@@ -73,8 +73,9 @@
     <form id="profileForm" method="dialog">
       <div class="dialog-head"><strong>発言者の設定</strong><button type="button" class="icon-btn" data-close>×</button></div>
       <label>あなたのPL名<input id="plName" maxlength="80" required></label>
+      <label class="avatar-upload"><span id="plIconPreview" class="avatar-preview"></span><span>PLアイコンを選択</span><input id="plIconInput" type="file" accept="image/*"></label>
       <div id="personaList"></div>
-      <div class="inline-fields"><input id="newPersonaName" maxlength="80" placeholder="キャラクター名"><select id="newPersonaType"><option value="PC">PC</option><option value="NPC">NPC</option></select><button type="button" id="savePersonaBtn" class="quiet">追加</button></div>
+      <div class="inline-fields"><input id="newPersonaName" maxlength="80" placeholder="キャラクター名"><select id="newPersonaType"><option value="PC">PC</option><option value="NPC">NPC</option></select><label class="mini-upload">画像<input id="newPersonaIcon" type="file" accept="image/*"></label><button type="button" id="savePersonaBtn" class="quiet">追加</button></div>
       <button type="submit" class="primary">保存</button>
     </form>
   </dialog>
