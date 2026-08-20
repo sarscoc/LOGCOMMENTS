@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS annotations (
   room_id TEXT NOT NULL,
   message_id TEXT NOT NULL,
   end_message_id TEXT NOT NULL DEFAULT '',
+  parent_id TEXT NOT NULL DEFAULT '',
   start_offset INTEGER NOT NULL,
   end_offset INTEGER NOT NULL,
   quote TEXT NOT NULL,

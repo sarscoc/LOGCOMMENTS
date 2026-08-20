@@ -22,6 +22,7 @@ const ensureAnnotationColumns = async db => {
   const info=await db.prepare("PRAGMA table_info(annotations)").all(),names=new Set((info.results||[]).map(column=>column.name));
   if(!names.has("persona_icon")){try{await db.prepare("ALTER TABLE annotations ADD COLUMN persona_icon TEXT NOT NULL DEFAULT ''").run()}catch(error){if(!String(error).includes("duplicate column"))throw error}}
   if(!names.has("end_message_id")){try{await db.prepare("ALTER TABLE annotations ADD COLUMN end_message_id TEXT NOT NULL DEFAULT ''").run()}catch(error){if(!String(error).includes("duplicate column"))throw error}}
+  if(!names.has("parent_id")){try{await db.prepare("ALTER TABLE annotations ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''").run()}catch(error){if(!String(error).includes("duplicate column"))throw error}}
 };
 
 export async function onRequest(context) {
@@ -64,9 +65,9 @@ export async function onRequest(context) {
       if (!exists) return json({ error: "部屋が見つかりません" }, 404);
       const id = randomToken(16);
       await env.DB.prepare(`INSERT INTO annotations
-        (id,room_id,message_id,end_message_id,start_offset,end_offset,quote,color,author_id,author_name,persona_name,persona_type,persona_icon,body)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
-          id, roomId, String(body.messageId), String(body.endMessageId || body.messageId), Number(body.startOffset) || 0, Number(body.endOffset) || 0,
+        (id,room_id,message_id,end_message_id,parent_id,start_offset,end_offset,quote,color,author_id,author_name,persona_name,persona_type,persona_icon,body)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+          id, roomId, String(body.messageId), String(body.endMessageId || body.messageId), String(body.parentId||""), Number(body.startOffset) || 0, Number(body.endOffset) || 0,
           String(body.quote).slice(0, 2000), String(body.color || "yellow"), String(body.authorId || randomToken(12)).slice(0, 100),
           String(body.authorName).slice(0, 80), String(body.personaName).slice(0, 80), String(body.personaType).slice(0, 20), String(body.personaIcon || "").slice(0, 100_000),
           String(body.body).slice(0, 4000)
