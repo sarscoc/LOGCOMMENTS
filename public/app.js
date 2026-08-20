@@ -1,5 +1,5 @@
 const $ = s => document.querySelector(s);
-const state = { roomId: null, room: null, annotations: [], parsed: null, selection: null, pendingSelection: null, activeTabIndex: 0, carouselPosition: 1, newPersonaIcon: "", profile: null, poller: null };
+const state = { roomId: null, room: null, annotations: [], parsed: null, selection: null, pendingSelection: null, activeTabIndex: 0, carouselPosition: 1, isSliding: false, slideQueue: 0, newPersonaIcon: "", profile: null, poller: null };
 const uid = () => crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now();
 const esc = value => String(value ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
@@ -116,7 +116,7 @@ function pagePanelHtml(tab, realIndex, trackIndex, grouped, search, clone = "") 
 }
 function setTrackPosition(position, animate = false) {
   const track = $("#pageTrack"); if (!track) return;
-  track.style.transition = animate ? "transform .42s cubic-bezier(.22,.75,.18,1)" : "none";
+  track.style.transition = animate ? "transform .52s cubic-bezier(.22,.8,.2,1)" : "none";
   track.style.transform = `translateX(${-position * 100}%)`;
 }
 function updateCarouselNav() {
@@ -140,14 +140,18 @@ function renderLog(anchorTime = "") {
   tabs.forEach((tab, index) => panels.push(pagePanelHtml(tab, index, index + 1, grouped, search)));
   panels.push(pagePanelHtml(tabs[0], 0, tabs.length + 1, grouped, search, "first"));
   state.carouselPosition = state.activeTabIndex + 1;
+  state.isSliding = false; state.slideQueue = 0;
   $("#logPane").innerHTML = `<div class="cylinder-nav"><button data-page="prev" aria-label="前のタブ">‹</button><div><small id="carouselIndex"></small><strong id="carouselTitle"></strong></div><button data-page="next" aria-label="次のタブ">›</button></div><div class="carousel-viewport"><div class="page-track" id="pageTrack">${panels.join("")}</div></div>`;
   setTrackPosition(state.carouselPosition, false); updateCarouselNav();
   if (anchorTime) syncPanelToTime(document.querySelector(`.log-page[data-track-index="${state.carouselPosition}"]`), anchorTime);
-  $("#pageTrack").addEventListener("transitionend", () => {
+  $("#pageTrack").addEventListener("transitionend", event => {
+    if (event.target !== $("#pageTrack") || event.propertyName !== "transform") return;
     const n = state.room.tabs.length;
     if (state.carouselPosition === 0) state.carouselPosition = n;
     else if (state.carouselPosition === n + 1) state.carouselPosition = 1;
     setTrackPosition(state.carouselPosition, false);
+    state.isSliding = false;
+    if (state.slideQueue) { const queued = state.slideQueue; state.slideQueue = 0; requestAnimationFrame(() => switchLogPage(queued)); }
   });
   const viewport=$(".carousel-viewport"); let touchStart=null;
   viewport.addEventListener("touchstart",e=>{const t=e.touches[0];touchStart={x:t.clientX,y:t.clientY}},{passive:true});
@@ -164,6 +168,8 @@ function currentReadingTime() {
 }
 function switchLogPage(direction) {
   if (!state.room?.tabs?.length) return;
+  if (state.isSliding) { state.slideQueue = direction < 0 ? -1 : 1; return; }
+  state.isSliding = true;
   const time = currentReadingTime(), n = state.room.tabs.length;
   state.carouselPosition += direction;
   state.activeTabIndex = (state.activeTabIndex + direction + n) % n;
@@ -207,7 +213,7 @@ function openCommentDialog() {
   state.pendingSelection = state.selection ? { ...state.selection } : null;
   if (!state.pendingSelection) return;
   if (!state.profile.plName) { openProfile(); return; }
-  fillPersonaSelect(); $("#dialogQuote").textContent = state.pendingSelection.quote; $("#commentBody").value = ""; $("#commentDialog").showModal(); positionCommentDialog(); setTimeout(()=>$("#commentBody").focus(),0);
+  fillPersonaSelect(); $("#dialogQuote").textContent = state.pendingSelection.quote; $("#commentBody").value = ""; $("#commentDialog").show(); positionCommentDialog(); setTimeout(()=>$("#commentBody").focus(),0);
 }
 function positionCommentDialog(){const dialog=$("#commentDialog"),a=state.pendingSelection;if(!a||innerWidth<=800){dialog.style.left="";dialog.style.top="";return}const width=Math.min(390,innerWidth-24),height=Math.min(dialog.offsetHeight||430,innerHeight-24);let left=a.anchorRight+12;if(left+width>innerWidth-12)left=Math.max(12,a.anchorLeft-width-12);let top=Math.min(Math.max(12,a.anchorTop-24),innerHeight-height-12);dialog.style.left=`${left}px`;dialog.style.top=`${top}px`}
 async function postComment(event) {
@@ -246,7 +252,8 @@ document.addEventListener("click",e=>{if(e.target.matches("[data-close]"))e.targ
 document.addEventListener("change",async e=>{if(e.target.matches("[data-persona-icon]")){const i=Number(e.target.dataset.personaIcon);state.profile.personas[i].icon=await resizeIcon(e.target.files[0]);saveProfile();renderPersonas()}});
 $("#plIconInput").onchange=async e=>{state.profile.plIcon=await resizeIcon(e.target.files[0]);saveProfile();renderPlIcon()};
 $("#newPersonaIcon").onchange=async e=>{state.newPersonaIcon=await resizeIcon(e.target.files[0])};
-$("#commentDialog").addEventListener("click",e=>{if(e.target!==$("#commentDialog"))return;if($("#commentBody").value.trim())$("#commentForm").requestSubmit();else $("#commentDialog").close()});
+document.addEventListener("pointerdown",e=>{const dialog=$("#commentDialog");if(!dialog.open||dialog.contains(e.target))return;if($("#commentBody").value.trim())$("#commentForm").requestSubmit();else dialog.close()});
+document.addEventListener("keydown",e=>{if(e.defaultPrevented||e.altKey||e.ctrlKey||e.metaKey)return;const target=e.target;if(target?.matches?.("input, textarea, select")||target?.isContentEditable)return;if(e.key==="ArrowLeft"||e.key==="ArrowRight"){e.preventDefault();switchLogPage(e.key==="ArrowRight"?1:-1)}});
 document.addEventListener("mouseup",()=>setTimeout(showSelection)); document.addEventListener("touchend",()=>setTimeout(showSelection,50));
 $("#markBtn").onclick=openCommentDialog; $("#tabFilter").onchange=e=>{const index=state.room.tabs.indexOf(e.target.value);if(index>=0){const time=currentReadingTime();state.activeTabIndex=index;renderLog(time)}}; $("#searchInput").oninput=()=>{const time=currentReadingTime();renderLog(time)};
 $("#shareBtn").onclick=async()=>{await navigator.clipboard.writeText(location.href);$("#roomStatus").textContent="共有URLをコピーしました";setTimeout(()=>$("#roomStatus").textContent="",1800)};
