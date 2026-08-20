@@ -49,6 +49,10 @@ Tekeyの全タブHTMLログを読み込み、秘密の共有URL上で本文へ�
 
 ## Cloudflare Pagesへの公開
 
+### Twitterカード画像
+
+好きな1200×630pxのPNG画像を `public/twitter-card.png` という名前で追加すると、Twitter/Xなどの共有カードへ使用されます。画像を差し替える場合も、同じファイル名で上書きします。
+
 ### 1. GitHubへ入れる
 
 このフォルダの中身を、新しいGitHubリポジトリへアップロードします。
