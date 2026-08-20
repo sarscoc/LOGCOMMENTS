@@ -40,15 +40,16 @@
         <div id="presenceBar" class="presence-bar" aria-label="入室中のPL"></div>
         <div class="filters">
           <select id="viewMode"><option value="compact">詰めたモード</option><option value="timeline">共有時間軸モード</option></select>
-          <select id="tabFilter"><option value="">すべてのタブ</option></select>
+          <select id="tabFilter" aria-label="メインタブ" title="メインタブを選択"><option value="">メインタブを選択</option></select>
           <input id="searchInput" type="search" placeholder="ログ内検索">
+          <button id="shareBtn" class="primary small">共有URLをコピー</button>
         </div>
-        <button id="shareBtn" class="primary small">共有URLをコピー</button>
         <p id="roomStatus" class="status"></p>
       </aside>
 
       <div class="reader-grid">
         <article id="logPane" class="log-pane" aria-label="TRPGログ"></article>
+        <aside id="tabSuggestions" class="tab-suggestions hidden" aria-label="別タブの発言"></aside>
         <aside id="commentsPane" class="comments-pane">
           <div class="comments-head"><strong>COMMENTS</strong><span id="commentCount">0</span></div>
           <div id="commentsList" class="comments-list"><p class="empty">マーカーされた感想がここに並びます。</p></div>
@@ -63,10 +64,8 @@
 
   <dialog id="commentDialog">
     <form id="commentForm" method="dialog">
-      <div class="dialog-head"><strong>感想を書く</strong><button type="button" class="icon-btn" data-close>×</button></div>
       <div class="comment-persona-picker"><span id="commentPersonaAvatar" class="comment-input-avatar"></span><select id="personaSelect" aria-label="発言者"></select></div>
       <textarea id="commentBody" rows="5" maxlength="4000" aria-label="感想" required></textarea>
-      <div class="dialog-actions"><button type="button" class="quiet" id="addPersonaBtn">＋ キャラ追加</button><button type="submit" class="primary">投稿</button></div>
     </form>
   </dialog>
 
@@ -75,8 +74,9 @@
       <div class="dialog-head"><strong>発言者の設定</strong><button type="button" class="icon-btn" data-close>×</button></div>
       <label>あなたのPL名<input id="plName" maxlength="80" required></label>
       <label class="avatar-upload"><span id="plIconPreview" class="avatar-preview"></span><span>PLアイコンを選択</span><input id="plIconInput" type="file" accept="image/*"></label>
+      <label class="marker-color-field">PLのマーカー色<input id="plMarkerColor" type="color" value="#ffe66b"></label>
       <div id="personaList"></div>
-      <div class="inline-fields"><input id="newPersonaName" maxlength="80" placeholder="キャラクター名"><select id="newPersonaType"><option value="PC">PC</option><option value="NPC">NPC</option></select><label class="mini-upload">画像<input id="newPersonaIcon" type="file" accept="image/*"></label><button type="button" id="savePersonaBtn" class="quiet">追加</button></div>
+      <div class="inline-fields"><input id="newPersonaName" maxlength="80" placeholder="キャラクター名"><select id="newPersonaType"><option value="PC">PC</option><option value="NPC">NPC</option></select><input id="newPersonaColor" type="color" value="#ffe66b" title="マーカー色"><label class="mini-upload">画像<input id="newPersonaIcon" type="file" accept="image/*"></label><button type="button" id="savePersonaBtn" class="quiet">追加</button></div>
       <button type="submit" class="primary">保存</button>
     </form>
   </dialog>

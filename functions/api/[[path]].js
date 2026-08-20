@@ -12,6 +12,18 @@ const safeBody = async request => {
   try { return await request.json(); } catch { return null; }
 };
 
+const ensurePresenceTable = async db => {
+  await db.prepare(`CREATE TABLE IF NOT EXISTS presence (room_id TEXT NOT NULL,author_id TEXT NOT NULL,pl_name TEXT NOT NULL,pl_icon TEXT NOT NULL DEFAULT '',is_typing INTEGER NOT NULL DEFAULT 0,last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY (room_id,author_id))`).run();
+  const info=await db.prepare("PRAGMA table_info(presence)").all();
+  if(!(info.results||[]).some(column=>column.name==="is_typing")){try{await db.prepare("ALTER TABLE presence ADD COLUMN is_typing INTEGER NOT NULL DEFAULT 0").run()}catch(error){if(!String(error).includes("duplicate column"))throw error}}
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_presence_room_seen ON presence(room_id,last_seen)").run();
+};
+const ensureAnnotationColumns = async db => {
+  const info=await db.prepare("PRAGMA table_info(annotations)").all(),names=new Set((info.results||[]).map(column=>column.name));
+  if(!names.has("persona_icon")){try{await db.prepare("ALTER TABLE annotations ADD COLUMN persona_icon TEXT NOT NULL DEFAULT ''").run()}catch(error){if(!String(error).includes("duplicate column"))throw error}}
+  if(!names.has("end_message_id")){try{await db.prepare("ALTER TABLE annotations ADD COLUMN end_message_id TEXT NOT NULL DEFAULT ''").run()}catch(error){if(!String(error).includes("duplicate column"))throw error}}
+};
+
 export async function onRequest(context) {
   const { request, env, params } = context;
   if (!env.DB) return json({ error: "D1データベースが接続されていません" }, 500);
@@ -37,6 +49,7 @@ export async function onRequest(context) {
   }
 
   if (parts[0] === "rooms" && parts[1] && parts[2] === "annotations") {
+    await ensureAnnotationColumns(env.DB);
     const roomId = parts[1];
     if (method === "GET") {
       const result = await env.DB.prepare("SELECT * FROM annotations WHERE room_id=? ORDER BY created_at,id").bind(roomId).all();
@@ -64,6 +77,7 @@ export async function onRequest(context) {
   }
   if (parts[0] === "rooms" && parts[1] && parts[2] === "presence") {
     const roomId=parts[1];
+    await ensurePresenceTable(env.DB);
     if(method==="GET"){const result=await env.DB.prepare("SELECT pl_name,pl_icon,is_typing,last_seen FROM presence WHERE room_id=? AND last_seen >= datetime('now','-70 seconds') ORDER BY last_seen DESC").bind(roomId).all();return json({presence:result.results||[]})}
     if(method==="POST"){
       const body=await safeBody(request);if(!body?.authorId||!String(body.plName||"").trim())return json({error:"PL名が必要です"},400);
