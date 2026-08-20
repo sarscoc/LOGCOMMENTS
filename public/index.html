@@ -27,6 +27,7 @@
         <span class="drop-title">HTMLログを選択</span>
         <span class="drop-note">または、ここへドロップ</span>
       </label>
+      <label class="archive-open">保存した部屋を開く<input id="archiveInput" type="file" accept=".zip,.trpglog,application/zip,application/json"></label>
       <div id="importPreview" class="import-preview hidden">
         <div><strong id="importTitle"></strong><span id="importCount"></span></div>
         <button id="createRoomBtn" class="primary">秘密の部屋を作る</button>
@@ -34,7 +35,7 @@
       <p id="homeStatus" class="status"></p>
       <p class="privacy">URLを知っている人だけが閲覧できます。検索エンジンには登録させません。</p>
       <section id="ownedRooms" class="owned-rooms hidden">
-        <div class="owned-rooms-head"><strong>作成した部屋</strong><small>このブラウザに管理情報がある部屋</small></div>
+        <div class="owned-rooms-head"><strong>作成した部屋</strong><small>通常は最大5部屋・このブラウザに管理情報がある部屋</small></div>
         <div id="ownedRoomList" class="owned-room-list"></div>
       </section>
       <section id="recentRooms" class="owned-rooms hidden">
@@ -52,6 +53,7 @@
           <input id="searchInput" type="search" placeholder="ログ内検索">
           <label class="font-size-control" title="ログの文字サイズ"><span>A−</span><input id="fontSize" type="range" min="10" max="20" step="0.5" aria-label="ログの文字サイズ"><span>A＋</span></label>
           <button id="shareBtn" class="primary small">共有URLをコピー</button>
+          <button id="exportRoomBtn" class="quiet small">部屋を保存</button>
         </div>
         <p id="roomStatus" class="status"></p>
       </aside>
@@ -75,12 +77,15 @@
     <form id="commentForm" method="dialog">
       <div class="comment-persona-picker"><span id="commentPersonaAvatar" class="comment-input-avatar"></span><select id="personaSelect" aria-label="発言者"></select></div>
       <textarea id="commentBody" rows="5" maxlength="4000" aria-label="感想"></textarea>
-      <div class="comment-image-row"><label class="comment-image-add">＋ 画像<input id="commentImageInput" type="file" accept="image/*"></label><div id="commentImagePreview" class="comment-image-preview hidden"></div><button id="commentImageRemove" class="comment-image-remove hidden" type="button" title="画像を外す">×</button></div>
       <button id="commentDeleteBtn" class="comment-edit-delete hidden" type="button">このコメントを削除</button>
     </form>
   </dialog>
 
   <dialog id="imageDialog" class="image-dialog"><button type="button" class="image-dialog-close" data-close aria-label="閉じる">×</button><img id="expandedCommentImage" alt="コメント画像"></dialog>
+
+  <dialog id="deleteRoomDialog">
+    <form method="dialog"><div class="dialog-head"><strong id="deleteRoomTitle">部屋を削除しますか？</strong><button type="button" class="icon-btn" data-close>×</button></div><p class="delete-room-note">ログと感想は元に戻せません。</p><div class="delete-room-actions"><button id="saveDeleteRoomBtn" type="button" class="primary">保存して削除</button><button id="deleteOnlyRoomBtn" type="button" class="danger-quiet">削除だけ</button><button type="button" class="quiet" data-close>キャンセル</button></div></form>
+  </dialog>
 
   <dialog id="profileDialog">
     <form id="profileForm" method="dialog">

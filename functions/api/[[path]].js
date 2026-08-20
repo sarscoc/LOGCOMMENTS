@@ -31,6 +31,11 @@ const ensureAnnotationLikes = async db => {
 const ensureLogChunksTable = async db => {
   await db.prepare(`CREATE TABLE IF NOT EXISTS room_log_chunks (room_id TEXT NOT NULL,chunk_index INTEGER NOT NULL,messages_json TEXT NOT NULL,PRIMARY KEY (room_id,chunk_index),FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE)`).run();
 };
+const ensureRoomOwnerColumn = async db => {
+  const info=await db.prepare("PRAGMA table_info(rooms)").all(),names=new Set((info.results||[]).map(column=>column.name));
+  if(!names.has("owner_id")){try{await db.prepare("ALTER TABLE rooms ADD COLUMN owner_id TEXT NOT NULL DEFAULT ''").run()}catch(error){if(!String(error).includes("duplicate column"))throw error}}
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_rooms_owner ON rooms(owner_id)").run();
+};
 const splitMessages = (messages,maxChars=300000) => {
   const chunks=[];let current=[],size=2;
   for(const message of messages){const text=JSON.stringify(message),next=size+text.length+(current.length?1:0);if(current.length&&next>maxChars){chunks.push(current);current=[];size=2}current.push(message);size+=text.length+(current.length>1?1:0)}
@@ -46,13 +51,16 @@ export async function onRequest(context) {
   if (method === "POST" && parts[0] === "rooms" && parts.length === 1) {
     const body = await safeBody(request);
     if (!body || !Array.isArray(body.messages) || !body.messages.length) return json({ error: "ログが空です" }, 400);
+    const ownerId=String(body.creatorId||"").slice(0,100);if(!ownerId)return json({error:"作成者情報がありません"},400);
+    await ensureRoomOwnerColumn(env.DB);const isSiteOwner=!!env.SITE_OWNER_KEY&&request.headers.get("x-site-owner-key")===env.SITE_OWNER_KEY;
+    if(!isSiteOwner){const owned=await env.DB.prepare("SELECT COUNT(*) AS count FROM rooms WHERE owner_id=?").bind(ownerId).first();if(Number(owned?.count||0)>=5)return json({error:"クラウドに保存できる部屋は5件までです。部屋を保存して、使わない部屋を削除してください。"},403)}
     if (JSON.stringify(body.messages).length > 25_000_000) return json({ error: "ログが大きすぎます（25MBまで）" }, 413);
     const id = randomToken(20);
     const adminToken = randomToken(24);
     const chunks=splitMessages(body.messages);
     try{
       await ensureLogChunksTable(env.DB);
-      await env.DB.prepare("INSERT INTO rooms (id,title,log_json,admin_token) VALUES (?,?,?,?)").bind(id,String(body.title||"TRPG LOG").slice(0,200),JSON.stringify({tabs:body.tabs||[],chunked:true,messageCount:body.messages.length}),adminToken).run();
+      await env.DB.prepare("INSERT INTO rooms (id,title,log_json,admin_token,owner_id) VALUES (?,?,?,?,?)").bind(id,String(body.title||"TRPG LOG").slice(0,200),JSON.stringify({tabs:body.tabs||[],chunked:true,messageCount:body.messages.length}),adminToken,ownerId).run();
       for(let index=0;index<chunks.length;index++)await env.DB.prepare("INSERT INTO room_log_chunks (room_id,chunk_index,messages_json) VALUES (?,?,?)").bind(id,index,JSON.stringify(chunks[index])).run();
       return json({id,adminToken},201);
     }catch(error){try{await env.DB.prepare("DELETE FROM room_log_chunks WHERE room_id=?").bind(id).run();await env.DB.prepare("DELETE FROM rooms WHERE id=?").bind(id).run()}catch{}return json({error:`ログの保存に失敗しました: ${String(error?.message||error).slice(0,180)}`},500)}
@@ -91,7 +99,7 @@ export async function onRequest(context) {
       const required = ["messageId", "quote", "authorName", "personaName", "personaType"];
       const missing = !body ? required : required.filter(key => body[key] == null || String(body[key]).trim() === "");
       if (missing.length) return json({ error: `入力が足りません（${missing.join(", ")}）` }, 400);
-      if(!String(body.body||"").trim()&&!String(body.imageData||"").startsWith("data:image/"))return json({error:"感想または画像を入力してください"},400);
+      if(!String(body.body||"").trim())return json({error:"感想を入力してください"},400);
       const exists = await env.DB.prepare("SELECT id FROM rooms WHERE id=?").bind(roomId).first();
       if (!exists) return json({ error: "部屋が見つかりません" }, 404);
       const id = randomToken(16);
@@ -101,7 +109,7 @@ export async function onRequest(context) {
           id, roomId, String(body.messageId), String(body.endMessageId || body.messageId), String(body.parentId||""), Number(body.startOffset) || 0, Number(body.endOffset) || 0,
           String(body.quote).slice(0, 2000), String(body.color || "yellow"), String(body.authorId || randomToken(12)).slice(0, 100),
           String(body.authorName).slice(0, 80), String(body.personaName).slice(0, 80), String(body.personaType).slice(0, 20), String(body.personaIcon || "").slice(0, 100_000),
-          String(body.body||"").slice(0, 4000),String(body.imageData||"").slice(0,700000)
+          String(body.body||"").slice(0, 4000),""
         ).run();
       const row = await env.DB.prepare("SELECT * FROM annotations WHERE id=?").bind(id).first();
       return json(row, 201);
