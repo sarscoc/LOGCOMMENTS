@@ -62,5 +62,15 @@ export async function onRequest(context) {
       return json(row, 201);
     }
   }
+  if (parts[0] === "rooms" && parts[1] && parts[2] === "presence") {
+    const roomId=parts[1];
+    if(method==="GET"){const result=await env.DB.prepare("SELECT pl_name,pl_icon,is_typing,last_seen FROM presence WHERE room_id=? AND last_seen >= datetime('now','-70 seconds') ORDER BY last_seen DESC").bind(roomId).all();return json({presence:result.results||[]})}
+    if(method==="POST"){
+      const body=await safeBody(request);if(!body?.authorId||!String(body.plName||"").trim())return json({error:"PL名が必要です"},400);
+      await env.DB.prepare(`INSERT INTO presence (room_id,author_id,pl_name,pl_icon,is_typing,last_seen) VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)
+        ON CONFLICT(room_id,author_id) DO UPDATE SET pl_name=excluded.pl_name,pl_icon=excluded.pl_icon,is_typing=excluded.is_typing,last_seen=CURRENT_TIMESTAMP`).bind(roomId,String(body.authorId).slice(0,100),String(body.plName).slice(0,80),String(body.plIcon||"").slice(0,100000),body.isTyping?1:0).run();
+      const result=await env.DB.prepare("SELECT pl_name,pl_icon,is_typing,last_seen FROM presence WHERE room_id=? AND last_seen >= datetime('now','-70 seconds') ORDER BY last_seen DESC").bind(roomId).all();return json({presence:result.results||[]})
+    }
+  }
   return json({ error: "Not found" }, 404);
 }
