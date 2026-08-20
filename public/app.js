@@ -128,7 +128,10 @@ function updateCarouselNav() {
   $("#carouselIndex").textContent = `${state.activeTabIndex + 1} / ${state.room.tabs.length}`;
   $("#carouselTitle").textContent = tab;
   $("#tabFilter").value = tab;
+  document.querySelectorAll("[data-tab-index]").forEach(button=>button.classList.toggle("active",Number(button.dataset.tabIndex)===state.activeTabIndex));
+  document.querySelector(".tab-rail [data-tab-index].active")?.scrollIntoView({behavior:"smooth",block:"nearest",inline:"center"});
 }
+function tabRailHtml(){return `<nav class="tab-rail" aria-label="タブ一覧">${state.room.tabs.map((tab,index)=>`<button type="button" data-tab-index="${index}" class="${index===state.activeTabIndex?"active":""}">${esc(tab)}</button>`).join("")}</nav>`}
 function syncPanelToTime(panel, time) {
   if (!panel || !time) return;
   const row = [...panel.querySelectorAll(".page-row[data-time]")].find(el => el.dataset.time === time);
@@ -146,7 +149,7 @@ function renderLog(anchorTime = "") {
   panels.push(pagePanelHtml(tabs[0], 0, tabs.length + 1, grouped, search, "first"));
   state.carouselPosition = state.activeTabIndex + 1;
   state.isSliding = false; state.slideQueue = 0;
-  $("#logPane").innerHTML = `<div class="cylinder-nav"><button data-page="prev" aria-label="前のタブ">‹</button><div><small id="carouselIndex"></small><strong id="carouselTitle"></strong></div><button data-page="next" aria-label="次のタブ">›</button></div><div class="carousel-viewport"><div class="page-track" id="pageTrack">${panels.join("")}</div></div>`;
+  $("#logPane").innerHTML = `${tabRailHtml()}<div class="cylinder-nav"><button data-page="prev" aria-label="前のタブ">‹</button><div><small id="carouselIndex"></small><strong id="carouselTitle"></strong></div><button data-page="next" aria-label="次のタブ">›</button></div><div class="carousel-viewport"><div class="page-track" id="pageTrack">${panels.join("")}</div></div>`;
   setTrackPosition(state.carouselPosition, false); updateCarouselNav();
   if (anchorTime) syncPanelToTime(document.querySelector(`.log-page[data-track-index="${state.carouselPosition}"]`), anchorTime);
   $("#pageTrack").addEventListener("transitionend", event => {
@@ -162,16 +165,18 @@ function renderLog(anchorTime = "") {
   viewport.addEventListener("touchstart",e=>{const t=e.touches[0];touchStart={x:t.clientX,y:t.clientY}},{passive:true});
   viewport.addEventListener("touchend",e=>{if(!touchStart)return;const t=e.changedTouches[0],dx=t.clientX-touchStart.x,dy=t.clientY-touchStart.y;touchStart=null;if(Math.abs(dx)>60&&Math.abs(dx)>Math.abs(dy)*1.2)switchLogPage(dx<0?1:-1)},{passive:true});
 }
+function sharedTimelineSlots(messages){const slots=[];messages.forEach((message,index)=>{const key=message.time||`untimed-${index}`;let slot=slots[slots.length-1];if(!slot||slot.key!==key){slot={key,time:message.time,byTab:new Map()};slots.push(slot)}const list=slot.byTab.get(message.tab)||[];list.push(message);slot.byTab.set(message.tab,list)});slots.forEach(slot=>{let units=1;slot.byTab.forEach(list=>{const size=list.reduce((sum,m)=>sum+1+Math.ceil((m.text.length+(m.speaker||"").length)/45),0);units=Math.max(units,size)});slot.height=Math.max(38,units*19+10)});return slots}
+function timelinePagePanelHtml(tab,realIndex,trackIndex,slots,grouped,search,clone=""){const rows=slots.map(slot=>{const list=(slot.byTab.get(tab)||[]).filter(m=>!search||`${m.speaker} ${m.text}`.toLowerCase().includes(search));return `<div class="page-row timeline-slot ${list.length?"has-message":"empty-slot"}" data-time="${esc(slot.time)}" style="height:${slot.height}px"><time>${esc(slot.time)}</time><div class="timeline-slot-content">${list.map(m=>messageHtml(m,grouped)).join("")}</div></div>`}).join("");return `<section class="log-page" data-real-index="${realIndex}" data-track-index="${trackIndex}" data-clone="${clone}"><div class="page-scroll timeline-page"><div class="page-title">${esc(tab)}</div>${rows}</div></section>`}
 function renderTimelineLog(anchorTime="") {
-  const search=$("#searchInput").value.trim().toLowerCase(), grouped=groupAnnotations(), selected=$("#tabFilter").value;
-  const messages=state.room.messages.filter(m=>(!selected||m.tab===selected)&&(!search||`${m.speaker} ${m.text}`.toLowerCase().includes(search)));
-  const groups=[], byTime=new Map();
-  messages.forEach((m,i)=>{const key=m.time||`untimed-${i}`;let group=byTime.get(key);if(!group){group={time:m.time,byTab:new Map()};byTime.set(key,group);groups.push(group)}const list=group.byTab.get(m.tab)||[];list.push(m);group.byTab.set(m.tab,list)});
-  $("#logPane").innerHTML=`<div class="timeline-head"><strong>完全な時系列</strong><span>同じ時刻の別タブを横並び</span></div><div class="timeline-scroll">${groups.map(g=>`<section class="timeline-row" data-time="${esc(g.time)}"><time>${esc(g.time)}</time><div class="parallel-panels">${[...g.byTab].map(([tab,list])=>`<div class="parallel-panel"><div class="parallel-tab">${esc(tab)}</div>${list.map(m=>messageHtml(m,grouped)).join("")}</div>`).join("")}</div></section>`).join("")||'<p class="empty">表示できる発言がありません。</p>'}</div>`;
-  if(anchorTime){const row=[...document.querySelectorAll(".timeline-row")].find(el=>el.dataset.time===anchorTime);row?.scrollIntoView({block:"center"})}
+  const tabs=state.room.tabs,search=$("#searchInput").value.trim().toLowerCase(),grouped=groupAnnotations(),slots=sharedTimelineSlots(state.room.messages);if(!tabs.length)return;
+  const panels=[timelinePagePanelHtml(tabs[tabs.length-1],tabs.length-1,0,slots,grouped,search,"last")];tabs.forEach((tab,index)=>panels.push(timelinePagePanelHtml(tab,index,index+1,slots,grouped,search)));panels.push(timelinePagePanelHtml(tabs[0],0,tabs.length+1,slots,grouped,search,"first"));
+  state.carouselPosition=state.activeTabIndex+1;state.isSliding=false;state.slideQueue=0;
+  $("#logPane").innerHTML=`${tabRailHtml()}<div class="cylinder-nav timeline-nav"><button data-page="prev" aria-label="前のタブ">‹</button><div><small id="carouselIndex"></small><strong id="carouselTitle"></strong></div><button data-page="next" aria-label="次のタブ">›</button></div><div class="carousel-viewport"><div class="page-track" id="pageTrack">${panels.join("")}</div></div>`;
+  setTrackPosition(state.carouselPosition,false);updateCarouselNav();if(anchorTime)syncPanelToTime(document.querySelector(`.log-page[data-track-index="${state.carouselPosition}"]`),anchorTime);
+  $("#pageTrack").addEventListener("transitionend",event=>{if(event.target!==$("#pageTrack")||event.propertyName!=="transform")return;const n=state.room.tabs.length;if(state.carouselPosition===0)state.carouselPosition=n;else if(state.carouselPosition===n+1)state.carouselPosition=1;setTrackPosition(state.carouselPosition,false);state.isSliding=false;if(state.slideQueue){const queued=state.slideQueue;state.slideQueue=0;requestAnimationFrame(()=>switchLogPage(queued))}});
+  const viewport=$(".carousel-viewport");let touchStart=null;viewport.addEventListener("touchstart",e=>{const t=e.touches[0];touchStart={x:t.clientX,y:t.clientY}},{passive:true});viewport.addEventListener("touchend",e=>{if(!touchStart)return;const t=e.changedTouches[0],dx=t.clientX-touchStart.x,dy=t.clientY-touchStart.y;touchStart=null;if(Math.abs(dx)>60&&Math.abs(dx)>Math.abs(dy)*1.2)switchLogPage(dx<0?1:-1)},{passive:true});
 }
 function currentReadingTime() {
-  if(state.viewMode==="timeline"){const scroll=$(".timeline-scroll");if(!scroll)return "";const y=scroll.getBoundingClientRect().top+scroll.clientHeight*.28;let best=null,distance=Infinity;document.querySelectorAll(".timeline-row[data-time]").forEach(row=>{const d=Math.abs(row.getBoundingClientRect().top-y);if(d<distance){distance=d;best=row}});return best?.dataset.time||""}
   const panel = document.querySelector(`.log-page[data-track-index="${state.carouselPosition}"]`);
   const scroll = panel?.querySelector(".page-scroll"); if (!scroll) return "";
   const rows = [...panel.querySelectorAll(".page-row[data-time]")];
@@ -181,7 +186,6 @@ function currentReadingTime() {
   return best?.dataset.time || "";
 }
 function switchLogPage(direction) {
-  if(state.viewMode==="timeline")return;
   if (!state.room?.tabs?.length) return;
   if (state.isSliding) { state.slideQueue = direction < 0 ? -1 : 1; return; }
   state.isSliding = true;
@@ -212,10 +216,9 @@ function selectionInfo() {
   const selection = getSelection(); if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
   const range=selection.getRangeAt(0), parent=node=>node.nodeType===1?node:node.parentElement, startMessage=parent(range.startContainer)?.closest?.(".log-message"), endMessage=parent(range.endContainer)?.closest?.(".log-message");
   if(!startMessage||!endMessage||!$("#logPane").contains(startMessage)||!$("#logPane").contains(endMessage))return null;
-  const startText=startMessage.querySelector(".message-text"),endText=endMessage.querySelector(".message-text");if(!startText?.contains(range.startContainer)||!endText?.contains(range.endContainer))return null;
-  const before=range.cloneRange();before.selectNodeContents(startText);before.setEnd(range.startContainer,range.startOffset);
-  const throughEnd=range.cloneRange();throughEnd.selectNodeContents(endText);throughEnd.setEnd(range.endContainer,range.endOffset);
-  const quote=range.toString(),rect=range.getBoundingClientRect();return {messageId:startMessage.dataset.message,endMessageId:endMessage.dataset.message,startOffset:before.toString().length,endOffset:throughEnd.toString().length,quote,anchorLeft:rect.left,anchorRight:rect.right,anchorTop:rect.top,anchorBottom:rect.bottom};
+  const startText=startMessage.querySelector(".message-text"),endText=endMessage.querySelector(".message-text");if(!startText||!endText)return null;
+  const textOffset=(textEl,node,offset,edge)=>{if(textEl.contains(node)){const partial=document.createRange();partial.selectNodeContents(textEl);partial.setEnd(node,offset);return partial.toString().length}if(parent(node)?.closest?.(".speaker"))return 0;return edge==="start"?0:textEl.textContent.length};
+  const quote=range.toString(),rect=range.getBoundingClientRect();return {messageId:startMessage.dataset.message,endMessageId:endMessage.dataset.message,startOffset:textOffset(startText,range.startContainer,range.startOffset,"start"),endOffset:textOffset(endText,range.endContainer,range.endOffset,"end"),quote,anchorLeft:rect.left,anchorRight:rect.right,anchorTop:rect.top,anchorBottom:rect.bottom};
 }
 function showSelection() {
   const nextSelection = selectionInfo();
@@ -268,6 +271,7 @@ for(const ev of ["dragleave","drop"]){$("#dropzone").addEventListener(ev,e=>{e.p
 $("#dropzone").addEventListener("drop",e=>e.dataTransfer.files[0]&&handleFile(e.dataTransfer.files[0]));
 $("#createRoomBtn").onclick=createRoom; $("#profileBtn").onclick=openProfile; $("#addPersonaBtn").onclick=openProfile; $("#savePersonaBtn").onclick=addPersona; $("#profileForm").onsubmit=saveProfileForm; $("#commentForm").onsubmit=postComment;
 document.addEventListener("click",e=>{if(e.target.matches("[data-close]"))e.target.closest("dialog").close(); const rm=e.target.closest("[data-remove-persona]");if(rm){state.profile.personas.splice(Number(rm.dataset.removePersona),1);renderPersonas()} const mark=e.target.closest("mark[data-ann]");if(mark)jumpToComment(mark.dataset.ann); const card=e.target.closest(".comment-card");if(card)jumpToMessage(card.dataset.target,card.id.replace("comment-","")); const count=e.target.closest("[data-message-comments]");if(count){const a=state.annotations.find(x=>x.message_id===count.dataset.messageComments);if(a)jumpToComment(a.id)} const page=e.target.closest("[data-page]");if(page)switchLogPage(page.dataset.page==="next"?1:-1)});
+document.addEventListener("click",e=>{const tab=e.target.closest("[data-tab-index]");if(!tab)return;const index=Number(tab.dataset.tabIndex);if(index===state.activeTabIndex)return;const time=currentReadingTime();state.activeTabIndex=index;renderLog(time)});
 document.addEventListener("change",async e=>{if(e.target.matches("[data-persona-icon]")){const i=Number(e.target.dataset.personaIcon);state.profile.personas[i].icon=await resizeIcon(e.target.files[0]);saveProfile();renderPersonas()}});
 $("#personaSelect").onchange=updateCommentPersonaAvatar;
 $("#plIconInput").onchange=async e=>{state.profile.plIcon=await resizeIcon(e.target.files[0]);saveProfile();renderPlIcon()};
