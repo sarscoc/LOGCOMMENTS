@@ -74,6 +74,12 @@ export async function onRequest(context) {
       const row = await env.DB.prepare("SELECT * FROM annotations WHERE id=?").bind(id).first();
       return json(row, 201);
     }
+    if(method==="PATCH"&&parts[3]==="color"){
+      const body=await safeBody(request),color=String(body?.color||"");
+      if(!body?.authorId||!body?.personaName||!body?.personaType||!color)return json({error:"色の更新情報が足りません"},400);
+      await env.DB.prepare("UPDATE annotations SET color=? WHERE room_id=? AND author_id=? AND persona_name=? AND persona_type=?").bind(color.slice(0,40),roomId,String(body.authorId).slice(0,100),String(body.personaName).slice(0,80),String(body.personaType).slice(0,20)).run();
+      return json({ok:true});
+    }
   }
   if (parts[0] === "rooms" && parts[1] && parts[2] === "presence") {
     const roomId=parts[1];

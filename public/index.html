@@ -10,6 +10,7 @@
 <body>
   <header class="topbar">
     <a class="brand" href="/">TRPG LOG MARKER</a>
+    <div id="presenceBar" class="presence-bar" aria-label="入室中のPL"></div>
     <div class="top-actions">
       <button id="themeBtn" class="icon-btn" title="表示切替">◐</button>
       <button id="profileBtn" class="quiet hidden">発言者</button>
@@ -37,7 +38,6 @@
     <section id="roomView" class="room hidden">
       <aside class="room-tools">
         <h1 id="roomTitle"></h1>
-        <div id="presenceBar" class="presence-bar" aria-label="入室中のPL"></div>
         <div class="filters">
           <select id="viewMode"><option value="compact">詰めたモード</option><option value="timeline">共有時間軸モード</option></select>
           <select id="tabFilter" aria-label="メインタブ" title="メインタブを選択"><option value="">メインタブを選択</option></select>
