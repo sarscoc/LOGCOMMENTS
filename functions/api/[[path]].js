@@ -91,6 +91,7 @@ export async function onRequest(context) {
       const row = await env.DB.prepare("SELECT * FROM annotations WHERE id=?").bind(id).first();
       return json(row, 201);
     }
+    if(method==="DELETE"&&parts[3]){const body=await safeBody(request),annotation=await env.DB.prepare("SELECT author_id FROM annotations WHERE room_id=? AND id=?").bind(roomId,parts[3]).first();if(!annotation)return json({error:"コメントが見つかりません"},404);const room=await env.DB.prepare("SELECT admin_token FROM rooms WHERE id=?").bind(roomId).first(),isAdmin=room&&request.headers.get("x-admin-token")===room.admin_token;if(!isAdmin&&(!body?.authorId||String(body.authorId)!==annotation.author_id))return json({error:"自分のコメントだけ削除できます"},403);await env.DB.prepare(`WITH RECURSIVE descendants(id) AS (SELECT id FROM annotations WHERE room_id=? AND id=? UNION ALL SELECT a.id FROM annotations a JOIN descendants d ON a.parent_id=d.id WHERE a.room_id=?) DELETE FROM annotations WHERE room_id=? AND id IN (SELECT id FROM descendants)`).bind(roomId,parts[3],roomId,roomId).run();return json({ok:true})}
     if(method==="PATCH"&&parts[3]==="color"){
       const body=await safeBody(request),color=String(body?.color||"");
       if(!body?.authorId||!body?.personaName||!body?.personaType||!color)return json({error:"色の更新情報が足りません"},400);
