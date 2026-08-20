@@ -63,6 +63,8 @@ export async function onRequest(context) {
     return json({ id: room.id, title: room.title, createdAt: room.created_at, ...log });
   }
 
+  if(method==="DELETE"&&parts[0]==="rooms"&&parts[1]&&parts.length===2){const room=await env.DB.prepare("SELECT admin_token FROM rooms WHERE id=?").bind(parts[1]).first();if(!room)return json({error:"部屋が見つかりません"},404);if(!request.headers.get("x-admin-token")||request.headers.get("x-admin-token")!==room.admin_token)return json({error:"部屋主だけが削除できます"},403);await ensureLogChunksTable(env.DB);await ensurePresenceTable(env.DB);await env.DB.batch([env.DB.prepare("DELETE FROM annotations WHERE room_id=?").bind(parts[1]),env.DB.prepare("DELETE FROM presence WHERE room_id=?").bind(parts[1]),env.DB.prepare("DELETE FROM room_log_chunks WHERE room_id=?").bind(parts[1]),env.DB.prepare("DELETE FROM rooms WHERE id=?").bind(parts[1])]);return json({ok:true})}
+
   if (parts[0] === "rooms" && parts[1] && parts[2] === "annotations") {
     await ensureAnnotationColumns(env.DB);
     const roomId = parts[1];
