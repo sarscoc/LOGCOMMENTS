@@ -35,6 +35,9 @@ CREATE TABLE IF NOT EXISTS presence (
   pl_name TEXT NOT NULL,
   pl_icon TEXT NOT NULL DEFAULT '',
   is_typing INTEGER NOT NULL DEFAULT 0,
+  typing_name TEXT NOT NULL DEFAULT '',
+  typing_icon TEXT NOT NULL DEFAULT '',
+  typing_message_id TEXT NOT NULL DEFAULT '',
   last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (room_id, author_id)
 );

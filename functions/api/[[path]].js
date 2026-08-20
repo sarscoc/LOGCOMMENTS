@@ -13,9 +13,9 @@ const safeBody = async request => {
 };
 
 const ensurePresenceTable = async db => {
-  await db.prepare(`CREATE TABLE IF NOT EXISTS presence (room_id TEXT NOT NULL,author_id TEXT NOT NULL,pl_name TEXT NOT NULL,pl_icon TEXT NOT NULL DEFAULT '',is_typing INTEGER NOT NULL DEFAULT 0,last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY (room_id,author_id))`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS presence (room_id TEXT NOT NULL,author_id TEXT NOT NULL,pl_name TEXT NOT NULL,pl_icon TEXT NOT NULL DEFAULT '',is_typing INTEGER NOT NULL DEFAULT 0,typing_name TEXT NOT NULL DEFAULT '',typing_icon TEXT NOT NULL DEFAULT '',typing_message_id TEXT NOT NULL DEFAULT '',last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY (room_id,author_id))`).run();
   const info=await db.prepare("PRAGMA table_info(presence)").all();
-  if(!(info.results||[]).some(column=>column.name==="is_typing")){try{await db.prepare("ALTER TABLE presence ADD COLUMN is_typing INTEGER NOT NULL DEFAULT 0").run()}catch(error){if(!String(error).includes("duplicate column"))throw error}}
+  const names=new Set((info.results||[]).map(column=>column.name));for(const [name,type] of [["is_typing","INTEGER NOT NULL DEFAULT 0"],["typing_name","TEXT NOT NULL DEFAULT ''"],["typing_icon","TEXT NOT NULL DEFAULT ''"],["typing_message_id","TEXT NOT NULL DEFAULT ''"]])if(!names.has(name)){try{await db.prepare(`ALTER TABLE presence ADD COLUMN ${name} ${type}`).run()}catch(error){if(!String(error).includes("duplicate column"))throw error}}
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_presence_room_seen ON presence(room_id,last_seen)").run();
 };
 const ensureAnnotationColumns = async db => {
@@ -98,12 +98,12 @@ export async function onRequest(context) {
   if (parts[0] === "rooms" && parts[1] && parts[2] === "presence") {
     const roomId=parts[1];
     await ensurePresenceTable(env.DB);
-    if(method==="GET"){const result=await env.DB.prepare("SELECT pl_name,pl_icon,is_typing,last_seen FROM presence WHERE room_id=? AND last_seen >= datetime('now','-70 seconds') ORDER BY last_seen DESC").bind(roomId).all();return json({presence:result.results||[]})}
+    if(method==="GET"){const result=await env.DB.prepare("SELECT pl_name,pl_icon,is_typing,typing_name,typing_icon,typing_message_id,last_seen FROM presence WHERE room_id=? AND last_seen >= datetime('now','-70 seconds') ORDER BY last_seen DESC").bind(roomId).all();return json({presence:result.results||[]})}
     if(method==="POST"){
       const body=await safeBody(request);if(!body?.authorId||!String(body.plName||"").trim())return json({error:"PL名が必要です"},400);
-      await env.DB.prepare(`INSERT INTO presence (room_id,author_id,pl_name,pl_icon,is_typing,last_seen) VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)
-        ON CONFLICT(room_id,author_id) DO UPDATE SET pl_name=excluded.pl_name,pl_icon=excluded.pl_icon,is_typing=excluded.is_typing,last_seen=CURRENT_TIMESTAMP`).bind(roomId,String(body.authorId).slice(0,100),String(body.plName).slice(0,80),String(body.plIcon||"").slice(0,100000),body.isTyping?1:0).run();
-      const result=await env.DB.prepare("SELECT pl_name,pl_icon,is_typing,last_seen FROM presence WHERE room_id=? AND last_seen >= datetime('now','-70 seconds') ORDER BY last_seen DESC").bind(roomId).all();return json({presence:result.results||[]})
+      await env.DB.prepare(`INSERT INTO presence (room_id,author_id,pl_name,pl_icon,is_typing,typing_name,typing_icon,typing_message_id,last_seen) VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+        ON CONFLICT(room_id,author_id) DO UPDATE SET pl_name=excluded.pl_name,pl_icon=excluded.pl_icon,is_typing=excluded.is_typing,typing_name=excluded.typing_name,typing_icon=excluded.typing_icon,typing_message_id=excluded.typing_message_id,last_seen=CURRENT_TIMESTAMP`).bind(roomId,String(body.authorId).slice(0,100),String(body.plName).slice(0,80),String(body.plIcon||"").slice(0,100000),body.isTyping?1:0,String(body.typingName||"").slice(0,80),String(body.typingIcon||"").slice(0,100000),String(body.typingMessageId||"").slice(0,100)).run();
+      const result=await env.DB.prepare("SELECT pl_name,pl_icon,is_typing,typing_name,typing_icon,typing_message_id,last_seen FROM presence WHERE room_id=? AND last_seen >= datetime('now','-70 seconds') ORDER BY last_seen DESC").bind(roomId).all();return json({presence:result.results||[]})
     }
   }
   return json({ error: "Not found" }, 404);
