@@ -51,9 +51,9 @@ export async function onRequest(context) {
       if (!exists) return json({ error: "部屋が見つかりません" }, 404);
       const id = randomToken(16);
       await env.DB.prepare(`INSERT INTO annotations
-        (id,room_id,message_id,start_offset,end_offset,quote,color,author_id,author_name,persona_name,persona_type,persona_icon,body)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
-          id, roomId, String(body.messageId), Number(body.startOffset) || 0, Number(body.endOffset) || 0,
+        (id,room_id,message_id,end_message_id,start_offset,end_offset,quote,color,author_id,author_name,persona_name,persona_type,persona_icon,body)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+          id, roomId, String(body.messageId), String(body.endMessageId || body.messageId), Number(body.startOffset) || 0, Number(body.endOffset) || 0,
           String(body.quote).slice(0, 2000), String(body.color || "yellow"), String(body.authorId || randomToken(12)).slice(0, 100),
           String(body.authorName).slice(0, 80), String(body.personaName).slice(0, 80), String(body.personaType).slice(0, 20), String(body.personaIcon || "").slice(0, 100_000),
           String(body.body).slice(0, 4000)

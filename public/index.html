@@ -38,6 +38,7 @@
       <aside class="room-tools">
         <h1 id="roomTitle"></h1>
         <div class="filters">
+          <select id="viewMode"><option value="compact">詰めたモード</option><option value="timeline">完全な時系列</option></select>
           <select id="tabFilter"><option value="">すべてのタブ</option></select>
           <input id="searchInput" type="search" placeholder="ログ内検索">
         </div>
@@ -62,8 +63,7 @@
   <dialog id="commentDialog">
     <form id="commentForm" method="dialog">
       <div class="dialog-head"><strong>感想を書く</strong><button type="button" class="icon-btn" data-close>×</button></div>
-      <blockquote id="dialogQuote"></blockquote>
-      <label>発言者<select id="personaSelect"></select></label>
+      <div class="comment-persona-picker"><span id="commentPersonaAvatar" class="comment-input-avatar"></span><select id="personaSelect" aria-label="発言者"></select></div>
       <textarea id="commentBody" rows="5" maxlength="4000" placeholder="ここが好き、しんどい、あとで見返したい……" required></textarea>
       <div class="dialog-actions"><button type="button" class="quiet" id="addPersonaBtn">＋ キャラ追加</button><button type="submit" class="primary">投稿</button></div>
     </form>

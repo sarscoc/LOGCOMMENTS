@@ -1,5 +1,5 @@
 const $ = s => document.querySelector(s);
-const state = { roomId: null, room: null, annotations: [], parsed: null, selection: null, pendingSelection: null, activeTabIndex: 0, carouselPosition: 1, isSliding: false, slideQueue: 0, newPersonaIcon: "", profile: null, poller: null };
+const state = { roomId: null, room: null, annotations: [], parsed: null, selection: null, pendingSelection: null, activeTabIndex: 0, carouselPosition: 1, isSliding: false, slideQueue: 0, viewMode: localStorage.getItem("trpgMarkerViewMode") || "compact", newPersonaIcon: "", profile: null, poller: null };
 const uid = () => crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now();
 const esc = value => String(value ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
@@ -33,7 +33,8 @@ function parseTekey(html, filename) {
     clone.querySelector(":scope > b")?.remove(); clone.querySelector(":scope > span")?.remove();
     const text = clone.textContent.replace(/\u00a0/g, " ").trimEnd();
     const tabClass = [...row.classList].find(c => /^tab\d+$/.test(c)) || "";
-    return { id: `m${i}`, speaker, text, color: row.style.color || "", time: (timeNode?.textContent || "").replace(/[\[\]]/g, ""), tab: tabLabels[tabClass] || tabClass, diceroll: row.classList.contains("diceroll"), system: speaker === "Tekey" };
+    const inlineColor = row.style.color || row.getAttribute("style")?.match(/(?:^|;)\s*color\s*:\s*([^;]+)/i)?.[1]?.trim() || "";
+    return { id: `m${i}`, speaker, text, color: inlineColor, time: (timeNode?.textContent || "").replace(/[\[\]]/g, ""), tab: tabLabels[tabClass] || tabClass, diceroll: row.classList.contains("diceroll"), system: speaker === "Tekey" };
   }).filter(m => m.speaker || m.text);
   return { title, tabs: [...new Set(messages.map(m => m.tab).filter(Boolean))], messages };
 }
@@ -79,11 +80,14 @@ async function openRoom(id) {
 }
 
 function groupAnnotations() {
-  return state.annotations.reduce((map, a) => ((map[a.message_id] ||= []).push(a), map), {});
+  const map = {}, indexes = new Map(state.room.messages.map((m,i)=>[m.id,i]));
+  state.annotations.forEach(a => { const start=indexes.get(a.message_id), end=indexes.get(a.end_message_id || a.message_id); if(start==null)return; for(let i=start;i<=(end??start);i++)(map[state.room.messages[i].id] ||= []).push(a); });
+  return map;
 }
 function markedText(message, anns) {
   if (!anns?.length) return esc(message.text);
-  const ranges = anns.map(a => ({ start: Math.max(0, a.start_offset), end: Math.min(message.text.length, a.end_offset), id: a.id })).filter(r => r.end > r.start).sort((a,b)=>a.start-b.start);
+  const indexes = new Map(state.room.messages.map((m,i)=>[m.id,i])), messageIndex=indexes.get(message.id);
+  const ranges = anns.map(a => { const startIndex=indexes.get(a.message_id),endIndex=indexes.get(a.end_message_id||a.message_id)??startIndex;if(messageIndex<startIndex||messageIndex>endIndex)return null;return {start:messageIndex===startIndex?Math.max(0,a.start_offset):0,end:messageIndex===endIndex?Math.min(message.text.length,a.end_offset):message.text.length,id:a.id}; }).filter(r=>r&&r.end>r.start).sort((a,b)=>a.start-b.start);
   let out = "", pos = 0;
   ranges.forEach(r => { if (r.start < pos) return; out += esc(message.text.slice(pos, r.start)); out += `<mark data-ann="${esc(r.id)}">${esc(message.text.slice(r.start, r.end))}</mark>`; pos = r.end; });
   return out + esc(message.text.slice(pos));
@@ -133,6 +137,7 @@ function syncPanelToTime(panel, time) {
 }
 function renderLog(anchorTime = "") {
   if (!state.room) return;
+  if (state.viewMode === "timeline") { renderTimelineLog(anchorTime); return; }
   const tabs = state.room.tabs, search = $("#searchInput").value.trim().toLowerCase(), grouped = groupAnnotations();
   if (!tabs.length) return;
   const panels = [];
@@ -157,7 +162,16 @@ function renderLog(anchorTime = "") {
   viewport.addEventListener("touchstart",e=>{const t=e.touches[0];touchStart={x:t.clientX,y:t.clientY}},{passive:true});
   viewport.addEventListener("touchend",e=>{if(!touchStart)return;const t=e.changedTouches[0],dx=t.clientX-touchStart.x,dy=t.clientY-touchStart.y;touchStart=null;if(Math.abs(dx)>60&&Math.abs(dx)>Math.abs(dy)*1.2)switchLogPage(dx<0?1:-1)},{passive:true});
 }
+function renderTimelineLog(anchorTime="") {
+  const search=$("#searchInput").value.trim().toLowerCase(), grouped=groupAnnotations(), selected=$("#tabFilter").value;
+  const messages=state.room.messages.filter(m=>(!selected||m.tab===selected)&&(!search||`${m.speaker} ${m.text}`.toLowerCase().includes(search)));
+  const groups=[], byTime=new Map();
+  messages.forEach((m,i)=>{const key=m.time||`untimed-${i}`;let group=byTime.get(key);if(!group){group={time:m.time,byTab:new Map()};byTime.set(key,group);groups.push(group)}const list=group.byTab.get(m.tab)||[];list.push(m);group.byTab.set(m.tab,list)});
+  $("#logPane").innerHTML=`<div class="timeline-head"><strong>完全な時系列</strong><span>同じ時刻の別タブを横並び</span></div><div class="timeline-scroll">${groups.map(g=>`<section class="timeline-row" data-time="${esc(g.time)}"><time>${esc(g.time)}</time><div class="parallel-panels">${[...g.byTab].map(([tab,list])=>`<div class="parallel-panel"><div class="parallel-tab">${esc(tab)}</div>${list.map(m=>messageHtml(m,grouped)).join("")}</div>`).join("")}</div></section>`).join("")||'<p class="empty">表示できる発言がありません。</p>'}</div>`;
+  if(anchorTime){const row=[...document.querySelectorAll(".timeline-row")].find(el=>el.dataset.time===anchorTime);row?.scrollIntoView({block:"center"})}
+}
 function currentReadingTime() {
+  if(state.viewMode==="timeline"){const scroll=$(".timeline-scroll");if(!scroll)return "";const y=scroll.getBoundingClientRect().top+scroll.clientHeight*.28;let best=null,distance=Infinity;document.querySelectorAll(".timeline-row[data-time]").forEach(row=>{const d=Math.abs(row.getBoundingClientRect().top-y);if(d<distance){distance=d;best=row}});return best?.dataset.time||""}
   const panel = document.querySelector(`.log-page[data-track-index="${state.carouselPosition}"]`);
   const scroll = panel?.querySelector(".page-scroll"); if (!scroll) return "";
   const rows = [...panel.querySelectorAll(".page-row[data-time]")];
@@ -167,6 +181,7 @@ function currentReadingTime() {
   return best?.dataset.time || "";
 }
 function switchLogPage(direction) {
+  if(state.viewMode==="timeline")return;
   if (!state.room?.tabs?.length) return;
   if (state.isSliding) { state.slideQueue = direction < 0 ? -1 : 1; return; }
   state.isSliding = true;
@@ -181,7 +196,7 @@ function switchLogPage(direction) {
 }
 function renderComments() {
   $("#commentCount").textContent = state.annotations.length;
-  $("#commentsList").innerHTML = state.annotations.length ? state.annotations.map(a => `<div class="comment-card" id="comment-${a.id}" data-target="${a.message_id}"><div class="comment-quote">${esc(a.quote)}</div><div class="comment-author">${a.persona_icon ? `<img class="comment-avatar" src="${esc(a.persona_icon)}" alt="">` : '<span class="comment-avatar empty-avatar"></span>'}<span>${esc(a.persona_name)}<span class="persona-type">${esc(a.persona_type)}</span></span></div><p class="comment-body">${esc(a.body)}</p></div>`).join("") : '<p class="empty">マーカーされた感想がここに並びます。</p>';
+  $("#commentsList").innerHTML = state.annotations.length ? state.annotations.map(a => `<div class="comment-card" id="comment-${a.id}" data-target="${a.message_id}"><div class="comment-author">${a.persona_icon ? `<img class="comment-avatar" src="${esc(a.persona_icon)}" alt="">` : '<span class="comment-avatar empty-avatar"></span>'}<span>${esc(a.persona_name)}<span class="persona-type">${esc(a.persona_type)}</span></span></div><p class="comment-body">${esc(a.body)}</p></div>`).join("") : '<p class="empty">マーカーされた感想がここに並びます。</p>';
 }
 async function refreshAnnotations() {
   if (!state.roomId) return;
@@ -195,11 +210,12 @@ async function refreshAnnotations() {
 
 function selectionInfo() {
   const selection = getSelection(); if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
-  const range = selection.getRangeAt(0), messageEl = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer.closest?.(".log-message") : range.commonAncestorContainer.parentElement?.closest(".log-message");
-  if (!messageEl || !$("#logPane").contains(messageEl)) return null;
-  const textEl = messageEl.querySelector(".message-text"); if (!textEl || !textEl.contains(range.startContainer) || !textEl.contains(range.endContainer)) return null;
-  const before = range.cloneRange(); before.selectNodeContents(textEl); before.setEnd(range.startContainer, range.startOffset);
-  const quote = range.toString(), rect=range.getBoundingClientRect(); return { messageId: messageEl.dataset.message, startOffset: before.toString().length, endOffset: before.toString().length + quote.length, quote, anchorLeft:rect.left, anchorRight:rect.right, anchorTop:rect.top, anchorBottom:rect.bottom };
+  const range=selection.getRangeAt(0), parent=node=>node.nodeType===1?node:node.parentElement, startMessage=parent(range.startContainer)?.closest?.(".log-message"), endMessage=parent(range.endContainer)?.closest?.(".log-message");
+  if(!startMessage||!endMessage||!$("#logPane").contains(startMessage)||!$("#logPane").contains(endMessage))return null;
+  const startText=startMessage.querySelector(".message-text"),endText=endMessage.querySelector(".message-text");if(!startText?.contains(range.startContainer)||!endText?.contains(range.endContainer))return null;
+  const before=range.cloneRange();before.selectNodeContents(startText);before.setEnd(range.startContainer,range.startOffset);
+  const throughEnd=range.cloneRange();throughEnd.selectNodeContents(endText);throughEnd.setEnd(range.endContainer,range.endOffset);
+  const quote=range.toString(),rect=range.getBoundingClientRect();return {messageId:startMessage.dataset.message,endMessageId:endMessage.dataset.message,startOffset:before.toString().length,endOffset:throughEnd.toString().length,quote,anchorLeft:rect.left,anchorRight:rect.right,anchorTop:rect.top,anchorBottom:rect.bottom};
 }
 function showSelection() {
   const nextSelection = selectionInfo();
@@ -208,12 +224,14 @@ function showSelection() {
 }
 function fillPersonaSelect() {
   $("#personaSelect").innerHTML = `<option value="PL">${esc(state.profile.plName || "PL名を設定") }（PL）</option>` + state.profile.personas.map((p,i)=>`<option value="${i}">${esc(p.name)}（${esc(p.type)}）</option>`).join("");
+  updateCommentPersonaAvatar();
 }
+function updateCommentPersonaAvatar(){const persona=currentPersona(),target=$("#commentPersonaAvatar");target.innerHTML=persona.icon?`<img src="${esc(persona.icon)}" alt="">`:`<span>${esc((persona.name||"?").slice(0,1))}</span>`}
 function openCommentDialog() {
   state.pendingSelection = state.selection ? { ...state.selection } : null;
   if (!state.pendingSelection) return;
   if (!state.profile.plName) { openProfile(); return; }
-  fillPersonaSelect(); $("#dialogQuote").textContent = state.pendingSelection.quote; $("#commentBody").value = ""; $("#commentDialog").show(); positionCommentDialog(); setTimeout(()=>$("#commentBody").focus(),0);
+  fillPersonaSelect(); $("#commentBody").value = ""; $("#commentDialog").show(); positionCommentDialog(); setTimeout(()=>$("#commentBody").focus(),0);
 }
 function positionCommentDialog(){const dialog=$("#commentDialog"),a=state.pendingSelection;if(!a||innerWidth<=800){dialog.style.left="";dialog.style.top="";return}const width=Math.min(390,innerWidth-24),height=Math.min(dialog.offsetHeight||430,innerHeight-24);let left=a.anchorRight+12;if(left+width>innerWidth-12)left=Math.max(12,a.anchorLeft-width-12);let top=Math.min(Math.max(12,a.anchorTop-24),innerHeight-height-12);dialog.style.left=`${left}px`;dialog.style.top=`${top}px`}
 async function postComment(event) {
@@ -229,12 +247,13 @@ function renderPlIcon() { $("#plIconPreview").innerHTML=avatarHtml(state.profile
 function renderPersonas() { $("#personaList").innerHTML = state.profile.personas.map((p,i)=>`<div class="persona-row"><label class="persona-avatar">${avatarHtml(p.icon || "")}<input type="file" accept="image/*" data-persona-icon="${i}"></label><span>${esc(p.name)}（${esc(p.type)}）</span><button type="button" class="icon-btn" data-remove-persona="${i}">×</button></div>`).join(""); }
 function addPersona() { const name=$("#newPersonaName").value.trim(); if(!name)return; state.profile.personas.push({name,type:$("#newPersonaType").value,icon:state.newPersonaIcon||""}); state.newPersonaIcon=""; $("#newPersonaName").value=""; $("#newPersonaIcon").value=""; renderPersonas(); }
 function saveProfileForm(e) { e.preventDefault(); const name=$("#plName").value.trim(); if(!name)return; state.profile.plName=name; saveProfile(); $("#profileDialog").close(); fillPersonaSelect(); if(state.pendingSelection)setTimeout(()=>openCommentDialog(),0); }
-function jumpToMessage(id, annotationId) { const message=state.room?.messages.find(m=>m.id===id); if(!message)return; const index=state.room.tabs.indexOf(message.tab); if(index!==state.activeTabIndex){state.activeTabIndex=index;renderLog(message.time)} const panel=document.querySelector(`.log-page[data-track-index="${state.activeTabIndex+1}"]`); const el=panel?.querySelector(`[data-message="${CSS.escape(id)}"]`); if(!el)return; el.scrollIntoView({behavior:"smooth",block:"center"}); el.classList.remove("flash"); requestAnimationFrame(()=>el.classList.add("flash")); if(annotationId)setTimeout(()=>el.querySelector(`[data-ann="${CSS.escape(annotationId)}"]`)?.classList.add("flash"),400); }
+function jumpToMessage(id, annotationId) { const message=state.room?.messages.find(m=>m.id===id); if(!message)return; let el;if(state.viewMode==="timeline"){el=document.querySelector(`[data-message="${CSS.escape(id)}"]`)}else{const index=state.room.tabs.indexOf(message.tab);if(index!==state.activeTabIndex){state.activeTabIndex=index;renderLog(message.time)}const panel=document.querySelector(`.log-page[data-track-index="${state.activeTabIndex+1}"]`);el=panel?.querySelector(`[data-message="${CSS.escape(id)}"]`)}if(!el)return;el.scrollIntoView({behavior:"smooth",block:"center"});el.classList.remove("flash");requestAnimationFrame(()=>el.classList.add("flash"));if(annotationId)setTimeout(()=>el.querySelector(`[data-ann="${CSS.escape(annotationId)}"]`)?.classList.add("flash"),400);}
 
 async function resizeIcon(file) {
   if (!file) return "";
   const bitmap = await createImageBitmap(file), size = 96, canvas = document.createElement("canvas"); canvas.width=size; canvas.height=size;
-  const ctx=canvas.getContext("2d"), scale=Math.max(size/bitmap.width,size/bitmap.height), w=bitmap.width*scale, h=bitmap.height*scale;
+  const ctx=canvas.getContext("2d"), scale=Math.min(size/bitmap.width,size/bitmap.height), w=bitmap.width*scale, h=bitmap.height*scale;
+  ctx.clearRect(0,0,size,size);
   ctx.drawImage(bitmap,(size-w)/2,(size-h)/2,w,h); bitmap.close?.();
   return canvas.toDataURL("image/webp",.82);
 }
@@ -250,11 +269,12 @@ $("#dropzone").addEventListener("drop",e=>e.dataTransfer.files[0]&&handleFile(e.
 $("#createRoomBtn").onclick=createRoom; $("#profileBtn").onclick=openProfile; $("#addPersonaBtn").onclick=openProfile; $("#savePersonaBtn").onclick=addPersona; $("#profileForm").onsubmit=saveProfileForm; $("#commentForm").onsubmit=postComment;
 document.addEventListener("click",e=>{if(e.target.matches("[data-close]"))e.target.closest("dialog").close(); const rm=e.target.closest("[data-remove-persona]");if(rm){state.profile.personas.splice(Number(rm.dataset.removePersona),1);renderPersonas()} const mark=e.target.closest("mark[data-ann]");if(mark)jumpToComment(mark.dataset.ann); const card=e.target.closest(".comment-card");if(card)jumpToMessage(card.dataset.target,card.id.replace("comment-","")); const count=e.target.closest("[data-message-comments]");if(count){const a=state.annotations.find(x=>x.message_id===count.dataset.messageComments);if(a)jumpToComment(a.id)} const page=e.target.closest("[data-page]");if(page)switchLogPage(page.dataset.page==="next"?1:-1)});
 document.addEventListener("change",async e=>{if(e.target.matches("[data-persona-icon]")){const i=Number(e.target.dataset.personaIcon);state.profile.personas[i].icon=await resizeIcon(e.target.files[0]);saveProfile();renderPersonas()}});
+$("#personaSelect").onchange=updateCommentPersonaAvatar;
 $("#plIconInput").onchange=async e=>{state.profile.plIcon=await resizeIcon(e.target.files[0]);saveProfile();renderPlIcon()};
 $("#newPersonaIcon").onchange=async e=>{state.newPersonaIcon=await resizeIcon(e.target.files[0])};
 document.addEventListener("pointerdown",e=>{const dialog=$("#commentDialog");if(!dialog.open||dialog.contains(e.target))return;if($("#commentBody").value.trim())$("#commentForm").requestSubmit();else dialog.close()});
 document.addEventListener("keydown",e=>{if(e.defaultPrevented||e.altKey||e.ctrlKey||e.metaKey)return;const target=e.target;if(target?.matches?.("input, textarea, select")||target?.isContentEditable)return;if(e.key==="ArrowLeft"||e.key==="ArrowRight"){e.preventDefault();switchLogPage(e.key==="ArrowRight"?1:-1)}});
 document.addEventListener("mouseup",()=>setTimeout(showSelection)); document.addEventListener("touchend",()=>setTimeout(showSelection,50));
-$("#markBtn").onclick=openCommentDialog; $("#tabFilter").onchange=e=>{const index=state.room.tabs.indexOf(e.target.value);if(index>=0){const time=currentReadingTime();state.activeTabIndex=index;renderLog(time)}}; $("#searchInput").oninput=()=>{const time=currentReadingTime();renderLog(time)};
+$("#markBtn").onclick=openCommentDialog; $("#viewMode").value=state.viewMode; $("#viewMode").onchange=e=>{const time=currentReadingTime();state.viewMode=e.target.value;if(state.viewMode==="timeline")$("#tabFilter").value="";localStorage.setItem("trpgMarkerViewMode",state.viewMode);renderLog(time)}; $("#tabFilter").onchange=e=>{const time=currentReadingTime(),index=state.room.tabs.indexOf(e.target.value);if(index>=0)state.activeTabIndex=index;renderLog(time)}; $("#searchInput").oninput=()=>{const time=currentReadingTime();renderLog(time)};
 $("#shareBtn").onclick=async()=>{await navigator.clipboard.writeText(location.href);$("#roomStatus").textContent="共有URLをコピーしました";setTimeout(()=>$("#roomStatus").textContent="",1800)};
 const roomId=new URLSearchParams(location.search).get("room"); if(roomId)openRoom(roomId);
