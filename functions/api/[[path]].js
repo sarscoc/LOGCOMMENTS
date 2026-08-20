@@ -24,6 +24,14 @@ const ensureAnnotationColumns = async db => {
   if(!names.has("end_message_id")){try{await db.prepare("ALTER TABLE annotations ADD COLUMN end_message_id TEXT NOT NULL DEFAULT ''").run()}catch(error){if(!String(error).includes("duplicate column"))throw error}}
   if(!names.has("parent_id")){try{await db.prepare("ALTER TABLE annotations ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''").run()}catch(error){if(!String(error).includes("duplicate column"))throw error}}
 };
+const ensureLogChunksTable = async db => {
+  await db.prepare(`CREATE TABLE IF NOT EXISTS room_log_chunks (room_id TEXT NOT NULL,chunk_index INTEGER NOT NULL,messages_json TEXT NOT NULL,PRIMARY KEY (room_id,chunk_index),FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE)`).run();
+};
+const splitMessages = (messages,maxChars=300000) => {
+  const chunks=[];let current=[],size=2;
+  for(const message of messages){const text=JSON.stringify(message),next=size+text.length+(current.length?1:0);if(current.length&&next>maxChars){chunks.push(current);current=[];size=2}current.push(message);size+=text.length+(current.length>1?1:0)}
+  if(current.length)chunks.push(current);return chunks;
+};
 
 export async function onRequest(context) {
   const { request, env, params } = context;
@@ -34,18 +42,23 @@ export async function onRequest(context) {
   if (method === "POST" && parts[0] === "rooms" && parts.length === 1) {
     const body = await safeBody(request);
     if (!body || !Array.isArray(body.messages) || !body.messages.length) return json({ error: "ログが空です" }, 400);
-    if (JSON.stringify(body.messages).length > 8_000_000) return json({ error: "ログが大きすぎます" }, 413);
+    if (JSON.stringify(body.messages).length > 25_000_000) return json({ error: "ログが大きすぎます（25MBまで）" }, 413);
     const id = randomToken(20);
     const adminToken = randomToken(24);
-    await env.DB.prepare("INSERT INTO rooms (id,title,log_json,admin_token) VALUES (?,?,?,?)")
-      .bind(id, String(body.title || "TRPG LOG").slice(0, 200), JSON.stringify({ messages: body.messages, tabs: body.tabs || [] }), adminToken).run();
-    return json({ id, adminToken }, 201);
+    const chunks=splitMessages(body.messages);
+    try{
+      await ensureLogChunksTable(env.DB);
+      await env.DB.prepare("INSERT INTO rooms (id,title,log_json,admin_token) VALUES (?,?,?,?)").bind(id,String(body.title||"TRPG LOG").slice(0,200),JSON.stringify({tabs:body.tabs||[],chunked:true,messageCount:body.messages.length}),adminToken).run();
+      for(let index=0;index<chunks.length;index++)await env.DB.prepare("INSERT INTO room_log_chunks (room_id,chunk_index,messages_json) VALUES (?,?,?)").bind(id,index,JSON.stringify(chunks[index])).run();
+      return json({id,adminToken},201);
+    }catch(error){try{await env.DB.prepare("DELETE FROM room_log_chunks WHERE room_id=?").bind(id).run();await env.DB.prepare("DELETE FROM rooms WHERE id=?").bind(id).run()}catch{}return json({error:`ログの保存に失敗しました: ${String(error?.message||error).slice(0,180)}`},500)}
   }
 
   if (method === "GET" && parts[0] === "rooms" && parts[1] && parts.length === 2) {
     const room = await env.DB.prepare("SELECT id,title,log_json,created_at FROM rooms WHERE id=?").bind(parts[1]).first();
     if (!room) return json({ error: "部屋が見つかりません" }, 404);
     const log = JSON.parse(room.log_json);
+    if(log.chunked){await ensureLogChunksTable(env.DB);const indexRows=await env.DB.prepare("SELECT chunk_index FROM room_log_chunks WHERE room_id=? ORDER BY chunk_index").bind(parts[1]).all();log.messages=[];for(const item of indexRows.results||[]){const row=await env.DB.prepare("SELECT messages_json FROM room_log_chunks WHERE room_id=? AND chunk_index=?").bind(parts[1],item.chunk_index).first();if(row?.messages_json)log.messages.push(...JSON.parse(row.messages_json))}}
     return json({ id: room.id, title: room.title, createdAt: room.created_at, ...log });
   }
 

@@ -39,3 +39,11 @@ CREATE TABLE IF NOT EXISTS presence (
   PRIMARY KEY (room_id, author_id)
 );
 CREATE INDEX IF NOT EXISTS idx_presence_room_seen ON presence(room_id, last_seen);
+
+CREATE TABLE IF NOT EXISTS room_log_chunks (
+  room_id TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  messages_json TEXT NOT NULL,
+  PRIMARY KEY (room_id, chunk_index),
+  FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
+);
