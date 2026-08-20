@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>TRPG LOG MARKER</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">TRPG LOG MARKER</a>
+    <div class="top-actions">
+      <button id="themeBtn" class="icon-btn" title="表示切替">◐</button>
+      <button id="profileBtn" class="quiet hidden">発言者</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="homeView" class="home card">
+      <p class="eyebrow">PRIVATE SHARED READING ROOM</p>
+      <h1>TRPGログに、みんなでマーカーと感想を。</h1>
+      <p class="lead">Tekeyの「全タブHTML」を選ぶと、読みやすいログへ整えて秘密の共有URLを作ります。</p>
+      <label class="dropzone" id="dropzone">
+        <input id="fileInput" type="file" accept=".html,text/html">
+        <span class="drop-title">HTMLログを選択</span>
+        <span class="drop-note">または、ここへドロップ</span>
+      </label>
+      <div id="importPreview" class="import-preview hidden">
+        <div><strong id="importTitle"></strong><span id="importCount"></span></div>
+        <button id="createRoomBtn" class="primary">秘密の部屋を作る</button>
+      </div>
+      <p id="homeStatus" class="status"></p>
+      <p class="privacy">URLを知っている人だけが閲覧できます。検索エンジンには登録させません。</p>
+    </section>
+
+    <section id="roomView" class="room hidden">
+      <aside class="room-tools">
+        <h1 id="roomTitle"></h1>
+        <div class="filters">
+          <select id="tabFilter"><option value="">すべてのタブ</option></select>
+          <input id="searchInput" type="search" placeholder="ログ内検索">
+        </div>
+        <button id="shareBtn" class="primary small">共有URLをコピー</button>
+        <p id="roomStatus" class="status"></p>
+      </aside>
+
+      <div class="reader-grid">
+        <article id="logPane" class="log-pane" aria-label="TRPGログ"></article>
+        <aside id="commentsPane" class="comments-pane">
+          <div class="comments-head"><strong>COMMENTS</strong><span id="commentCount">0</span></div>
+          <div id="commentsList" class="comments-list"><p class="empty">マーカーされた感想がここに並びます。</p></div>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <div id="selectionBar" class="selection-bar hidden">
+    <span id="selectedQuote"></span><button id="markBtn" class="primary small">マーカー＋感想</button>
+  </div>
+
+  <dialog id="commentDialog">
+    <form id="commentForm" method="dialog">
+      <div class="dialog-head"><strong>感想を書く</strong><button type="button" class="icon-btn" data-close>×</button></div>
+      <blockquote id="dialogQuote"></blockquote>
+      <label>発言者<select id="personaSelect"></select></label>
+      <textarea id="commentBody" rows="5" maxlength="4000" placeholder="ここが好き、しんどい、あとで見返したい……" required></textarea>
+      <div class="dialog-actions"><button type="button" class="quiet" id="addPersonaBtn">＋ キャラ追加</button><button type="submit" class="primary">投稿</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="profileDialog">
+    <form id="profileForm" method="dialog">
+      <div class="dialog-head"><strong>発言者の設定</strong><button type="button" class="icon-btn" data-close>×</button></div>
+      <label>あなたのPL名<input id="plName" maxlength="80" required></label>
+      <div id="personaList"></div>
+      <div class="inline-fields"><input id="newPersonaName" maxlength="80" placeholder="キャラクター名"><select id="newPersonaType"><option value="PC">PC</option><option value="NPC">NPC</option></select><button type="button" id="savePersonaBtn" class="quiet">追加</button></div>
+      <button type="submit" class="primary">保存</button>
+    </form>
+  </dialog>
+  <script src="app.js"></script>
+</body>
+</html>
