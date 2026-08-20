@@ -6,6 +6,9 @@ const esc = value => String(value ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;"
 function loadProfile() {
   const saved = JSON.parse(localStorage.getItem("trpgMarkerProfile") || "null");
   state.profile = saved || { id: uid(), plName: "", personas: [] };
+  if (!state.profile.id) state.profile.id = uid();
+  if (!Array.isArray(state.profile.personas)) state.profile.personas = [];
+  saveProfile();
 }
 function saveProfile() { localStorage.setItem("trpgMarkerProfile", JSON.stringify(state.profile)); }
 function currentPersona() {
@@ -84,15 +87,31 @@ function markedText(message, anns) {
   ranges.forEach(r => { if (r.start < pos) return; out += esc(message.text.slice(pos, r.start)); out += `<mark data-ann="${esc(r.id)}">${esc(message.text.slice(r.start, r.end))}</mark>`; pos = r.end; });
   return out + esc(message.text.slice(pos));
 }
+function messageHtml(m, grouped) {
+  const anns = grouped[m.id] || [];
+  return `<div class="log-message ${m.system ? "system-message" : ""} ${m.diceroll ? "diceroll" : ""}" data-message="${m.id}"><span class="speaker">${esc(m.speaker || "")}${m.speaker ? "：" : ""}</span><span class="message-text">${markedText(m, anns)}</span>${anns.length ? `<button class="annotation-count" data-message-comments="${m.id}">${anns.length}</button>` : ""}</div>`;
+}
+function timelineGroups(messages) {
+  const groups = [];
+  messages.forEach((message, index) => {
+    const key = message.time || `untimed-${index}`;
+    let group = groups[groups.length - 1];
+    if (!group || group.key !== key) { group = { key, time: message.time, tabs: [], tabMap: new Map() }; groups.push(group); }
+    const tabName = message.tab || "LOG";
+    let panel = group.tabMap.get(tabName);
+    if (!panel) { panel = { name: tabName, messages: [] }; group.tabMap.set(tabName, panel); group.tabs.push(panel); }
+    panel.messages.push(message);
+  });
+  return groups;
+}
 function renderLog() {
   if (!state.room) return;
   const tab = $("#tabFilter").value, search = $("#searchInput").value.trim().toLowerCase(), grouped = groupAnnotations();
-  $("#logPane").innerHTML = state.room.messages.filter(m => (!tab || m.tab === tab) && (!search || `${m.speaker} ${m.text}`.toLowerCase().includes(search))).map(m => {
-    const anns = grouped[m.id] || [];
-    return `<div class="log-message ${m.system ? "system-message" : ""} ${m.diceroll ? "diceroll" : ""}" data-message="${m.id}">
-      <span class="speaker">${esc(m.speaker || "")}${m.speaker ? "：" : ""}</span><span class="message-text">${markedText(m, anns)}</span>
-      ${m.time ? `<span class="timestamp">${esc(m.time)}</span>` : ""}${m.tab ? `<span class="tab-badge">${esc(m.tab)}</span>` : ""}
-      ${anns.length ? `<button class="annotation-count" data-message-comments="${m.id}">${anns.length}</button>` : ""}</div>`;
+  const visible = state.room.messages.filter(m => (!tab || m.tab === tab) && (!search || `${m.speaker} ${m.text}`.toLowerCase().includes(search)));
+  $("#logPane").innerHTML = timelineGroups(visible).map((group, index) => {
+    const multi = group.tabs.length > 1;
+    const panels = group.tabs.map(panel => `<section class="time-panel"><div class="panel-tab">${esc(panel.name)}</div>${panel.messages.map(m => messageHtml(m, grouped)).join("")}</section>`).join("");
+    return `<div class="time-cluster ${multi ? "parallel" : ""}"><div class="time-rail"><time>${esc(group.time || "")}</time>${multi ? `<span>${group.tabs.length} TABS</span>` : ""}</div><div class="time-content">${multi ? `<button class="slide-btn prev" data-slide="prev" aria-label="前のタブ">‹</button>` : ""}<div class="time-panels" id="time-panels-${index}">${panels}</div>${multi ? `<button class="slide-btn next" data-slide="next" aria-label="次のタブ">›</button>` : ""}</div></div>`;
   }).join("");
 }
 function renderComments() {
@@ -151,7 +170,7 @@ for(const ev of ["dragenter","dragover"]){$("#dropzone").addEventListener(ev,e=>
 for(const ev of ["dragleave","drop"]){$("#dropzone").addEventListener(ev,e=>{e.preventDefault();e.currentTarget.classList.remove("drag")})}
 $("#dropzone").addEventListener("drop",e=>e.dataTransfer.files[0]&&handleFile(e.dataTransfer.files[0]));
 $("#createRoomBtn").onclick=createRoom; $("#profileBtn").onclick=openProfile; $("#addPersonaBtn").onclick=openProfile; $("#savePersonaBtn").onclick=addPersona; $("#profileForm").onsubmit=saveProfileForm; $("#commentForm").onsubmit=postComment;
-document.addEventListener("click",e=>{if(e.target.matches("[data-close]"))e.target.closest("dialog").close(); const rm=e.target.closest("[data-remove-persona]");if(rm){state.profile.personas.splice(Number(rm.dataset.removePersona),1);renderPersonas()} const mark=e.target.closest("mark[data-ann]");if(mark)jumpToComment(mark.dataset.ann); const card=e.target.closest(".comment-card");if(card)jumpToMessage(card.dataset.target,card.id.replace("comment-","")); const count=e.target.closest("[data-message-comments]");if(count){const a=state.annotations.find(x=>x.message_id===count.dataset.messageComments);if(a)jumpToComment(a.id)}});
+document.addEventListener("click",e=>{if(e.target.matches("[data-close]"))e.target.closest("dialog").close(); const rm=e.target.closest("[data-remove-persona]");if(rm){state.profile.personas.splice(Number(rm.dataset.removePersona),1);renderPersonas()} const mark=e.target.closest("mark[data-ann]");if(mark)jumpToComment(mark.dataset.ann); const card=e.target.closest(".comment-card");if(card)jumpToMessage(card.dataset.target,card.id.replace("comment-","")); const count=e.target.closest("[data-message-comments]");if(count){const a=state.annotations.find(x=>x.message_id===count.dataset.messageComments);if(a)jumpToComment(a.id)} const slide=e.target.closest("[data-slide]");if(slide){const panels=slide.parentElement.querySelector(".time-panels");panels.scrollBy({left:(slide.dataset.slide==="next"?1:-1)*panels.clientWidth,behavior:"smooth"})}});
 document.addEventListener("mouseup",()=>setTimeout(showSelection)); document.addEventListener("touchend",()=>setTimeout(showSelection,50));
 $("#markBtn").onclick=openCommentDialog; $("#tabFilter").onchange=renderLog; $("#searchInput").oninput=renderLog;
 $("#shareBtn").onclick=async()=>{await navigator.clipboard.writeText(location.href);$("#roomStatus").textContent="共有URLをコピーしました";setTimeout(()=>$("#roomStatus").textContent="",1800)};

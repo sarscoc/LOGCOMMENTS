@@ -44,8 +44,9 @@ export async function onRequest(context) {
     }
     if (method === "POST") {
       const body = await safeBody(request);
-      const required = ["messageId", "quote", "authorId", "authorName", "personaName", "personaType", "body"];
-      if (!body || required.some(key => body[key] == null || String(body[key]).trim() === "")) return json({ error: "入力が足りません" }, 400);
+      const required = ["messageId", "quote", "authorName", "personaName", "personaType", "body"];
+      const missing = !body ? required : required.filter(key => body[key] == null || String(body[key]).trim() === "");
+      if (missing.length) return json({ error: `入力が足りません（${missing.join(", ")}）` }, 400);
       const exists = await env.DB.prepare("SELECT id FROM rooms WHERE id=?").bind(roomId).first();
       if (!exists) return json({ error: "部屋が見つかりません" }, 404);
       const id = randomToken(16);
@@ -53,7 +54,7 @@ export async function onRequest(context) {
         (id,room_id,message_id,start_offset,end_offset,quote,color,author_id,author_name,persona_name,persona_type,body)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
           id, roomId, String(body.messageId), Number(body.startOffset) || 0, Number(body.endOffset) || 0,
-          String(body.quote).slice(0, 2000), String(body.color || "yellow"), String(body.authorId).slice(0, 100),
+          String(body.quote).slice(0, 2000), String(body.color || "yellow"), String(body.authorId || randomToken(12)).slice(0, 100),
           String(body.authorName).slice(0, 80), String(body.personaName).slice(0, 80), String(body.personaType).slice(0, 20),
           String(body.body).slice(0, 4000)
         ).run();
