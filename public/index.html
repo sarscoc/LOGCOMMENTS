@@ -20,8 +20,8 @@
   <main>
     <section id="homeView" class="home card">
       <p class="eyebrow">PRIVATE SHARED READING ROOM</p>
-      <h1>TRPGログに、みんなでマーカーと感想を。</h1>
-      <p class="lead">Tekeyの「全タブHTML」を選ぶと、読みやすいログへ整えて秘密の共有URLを作ります。</p>
+      <h1>TRPGログにみんなで感想を。</h1>
+      <p class="lead">ログにリアルタイムでコメントを付けるサイトです。</p>
       <label class="dropzone" id="dropzone">
         <input id="fileInput" type="file" accept=".html,text/html">
         <span class="drop-title">HTMLログを選択</span>
@@ -50,7 +50,7 @@
           <select id="viewMode"><option value="compact">詰めたモード</option><option value="timeline">共有時間軸モード</option></select>
           <select id="tabFilter" aria-label="メインタブ" title="メインタブを選択"><option value="">メインタブを選択</option></select>
           <input id="searchInput" type="search" placeholder="ログ内検索">
-          <label class="font-size-control" title="ログの文字サイズ"><span>A</span><input id="fontSize" type="range" min="10" max="20" step="0.5"><strong id="fontSizeValue"></strong></label>
+          <label class="font-size-control" title="ログの文字サイズ"><span>A−</span><input id="fontSize" type="range" min="10" max="20" step="0.5" aria-label="ログの文字サイズ"><span>A＋</span></label>
           <button id="shareBtn" class="primary small">共有URLをコピー</button>
         </div>
         <p id="roomStatus" class="status"></p>
@@ -74,7 +74,8 @@
   <dialog id="commentDialog">
     <form id="commentForm" method="dialog">
       <div class="comment-persona-picker"><span id="commentPersonaAvatar" class="comment-input-avatar"></span><select id="personaSelect" aria-label="発言者"></select></div>
-      <textarea id="commentBody" rows="5" maxlength="4000" aria-label="感想" required></textarea>
+      <textarea id="commentBody" rows="5" maxlength="4000" aria-label="感想"></textarea>
+      <div class="comment-image-row"><label class="comment-image-add">＋ 画像<input id="commentImageInput" type="file" accept="image/*"></label><div id="commentImagePreview" class="comment-image-preview hidden"></div><button id="commentImageRemove" class="comment-image-remove hidden" type="button" title="画像を外す">×</button></div>
     </form>
   </dialog>
 

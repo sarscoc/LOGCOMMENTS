@@ -23,6 +23,7 @@ const ensureAnnotationColumns = async db => {
   if(!names.has("persona_icon")){try{await db.prepare("ALTER TABLE annotations ADD COLUMN persona_icon TEXT NOT NULL DEFAULT ''").run()}catch(error){if(!String(error).includes("duplicate column"))throw error}}
   if(!names.has("end_message_id")){try{await db.prepare("ALTER TABLE annotations ADD COLUMN end_message_id TEXT NOT NULL DEFAULT ''").run()}catch(error){if(!String(error).includes("duplicate column"))throw error}}
   if(!names.has("parent_id")){try{await db.prepare("ALTER TABLE annotations ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''").run()}catch(error){if(!String(error).includes("duplicate column"))throw error}}
+  if(!names.has("image_data")){try{await db.prepare("ALTER TABLE annotations ADD COLUMN image_data TEXT NOT NULL DEFAULT ''").run()}catch(error){if(!String(error).includes("duplicate column"))throw error}}
 };
 const ensureLogChunksTable = async db => {
   await db.prepare(`CREATE TABLE IF NOT EXISTS room_log_chunks (room_id TEXT NOT NULL,chunk_index INTEGER NOT NULL,messages_json TEXT NOT NULL,PRIMARY KEY (room_id,chunk_index),FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE)`).run();
@@ -68,25 +69,34 @@ export async function onRequest(context) {
   if (parts[0] === "rooms" && parts[1] && parts[2] === "annotations") {
     await ensureAnnotationColumns(env.DB);
     const roomId = parts[1];
+    if(method==="GET"&&parts[3]&&parts[4]==="image"){
+      const row=await env.DB.prepare("SELECT image_data FROM annotations WHERE room_id=? AND id=?").bind(roomId,parts[3]).first();
+      if(!row?.image_data)return new Response("Not found",{status:404});
+      const match=String(row.image_data).match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+      if(!match)return new Response("Invalid image",{status:415});
+      const binary=atob(match[2]),bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+      return new Response(bytes,{headers:{"content-type":match[1],"cache-control":"private, max-age=31536000, immutable"}});
+    }
     if (method === "GET") {
-      const result = await env.DB.prepare("SELECT * FROM annotations WHERE room_id=? ORDER BY created_at,id").bind(roomId).all();
+      const result = await env.DB.prepare("SELECT id,room_id,message_id,end_message_id,parent_id,start_offset,end_offset,quote,color,author_id,author_name,persona_name,persona_type,persona_icon,body,created_at,CASE WHEN image_data<>'' THEN 1 ELSE 0 END AS has_image FROM annotations WHERE room_id=? ORDER BY created_at,id").bind(roomId).all();
       return json({ annotations: result.results || [] });
     }
     if (method === "POST") {
       const body = await safeBody(request);
-      const required = ["messageId", "quote", "authorName", "personaName", "personaType", "body"];
+      const required = ["messageId", "quote", "authorName", "personaName", "personaType"];
       const missing = !body ? required : required.filter(key => body[key] == null || String(body[key]).trim() === "");
       if (missing.length) return json({ error: `入力が足りません（${missing.join(", ")}）` }, 400);
+      if(!String(body.body||"").trim()&&!String(body.imageData||"").startsWith("data:image/"))return json({error:"感想または画像を入力してください"},400);
       const exists = await env.DB.prepare("SELECT id FROM rooms WHERE id=?").bind(roomId).first();
       if (!exists) return json({ error: "部屋が見つかりません" }, 404);
       const id = randomToken(16);
       await env.DB.prepare(`INSERT INTO annotations
-        (id,room_id,message_id,end_message_id,parent_id,start_offset,end_offset,quote,color,author_id,author_name,persona_name,persona_type,persona_icon,body)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+        (id,room_id,message_id,end_message_id,parent_id,start_offset,end_offset,quote,color,author_id,author_name,persona_name,persona_type,persona_icon,body,image_data)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
           id, roomId, String(body.messageId), String(body.endMessageId || body.messageId), String(body.parentId||""), Number(body.startOffset) || 0, Number(body.endOffset) || 0,
           String(body.quote).slice(0, 2000), String(body.color || "yellow"), String(body.authorId || randomToken(12)).slice(0, 100),
           String(body.authorName).slice(0, 80), String(body.personaName).slice(0, 80), String(body.personaType).slice(0, 20), String(body.personaIcon || "").slice(0, 100_000),
-          String(body.body).slice(0, 4000)
+          String(body.body||"").slice(0, 4000),String(body.imageData||"").slice(0,700000)
         ).run();
       const row = await env.DB.prepare("SELECT * FROM annotations WHERE id=?").bind(id).first();
       return json(row, 201);
