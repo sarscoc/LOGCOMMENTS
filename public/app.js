@@ -1,5 +1,5 @@
 const $ = s => document.querySelector(s);
-const state = { roomId: null, room: null, annotations: [], parsed: null, selection: null, profile: null, poller: null };
+const state = { roomId: null, room: null, annotations: [], parsed: null, selection: null, pendingSelection: null, activeTabIndex: 0, profile: null, poller: null };
 const uid = () => crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now();
 const esc = value => String(value ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
@@ -104,15 +104,34 @@ function timelineGroups(messages) {
   });
   return groups;
 }
-function renderLog() {
+function activeTabName() {
+  return state.room?.tabs?.[state.activeTabIndex] || state.room?.tabs?.[0] || "";
+}
+function renderLog(anchorTime = "") {
   if (!state.room) return;
-  const tab = $("#tabFilter").value, search = $("#searchInput").value.trim().toLowerCase(), grouped = groupAnnotations();
-  const visible = state.room.messages.filter(m => (!tab || m.tab === tab) && (!search || `${m.speaker} ${m.text}`.toLowerCase().includes(search)));
-  $("#logPane").innerHTML = timelineGroups(visible).map((group, index) => {
-    const multi = group.tabs.length > 1;
-    const panels = group.tabs.map(panel => `<section class="time-panel"><div class="panel-tab">${esc(panel.name)}</div>${panel.messages.map(m => messageHtml(m, grouped)).join("")}</section>`).join("");
-    return `<div class="time-cluster ${multi ? "parallel" : ""}"><div class="time-rail"><time>${esc(group.time || "")}</time>${multi ? `<span>${group.tabs.length} TABS</span>` : ""}</div><div class="time-content">${multi ? `<button class="slide-btn prev" data-slide="prev" aria-label="前のタブ">‹</button>` : ""}<div class="time-panels" id="time-panels-${index}">${panels}</div>${multi ? `<button class="slide-btn next" data-slide="next" aria-label="次のタブ">›</button>` : ""}</div></div>`;
-  }).join("");
+  const tab = activeTabName(), search = $("#searchInput").value.trim().toLowerCase(), grouped = groupAnnotations();
+  $("#tabFilter").value = tab;
+  const visible = state.room.messages.filter(m => m.tab === tab && (!search || `${m.speaker} ${m.text}`.toLowerCase().includes(search)));
+  const rows = visible.map(m => `<div class="page-row" data-time="${esc(m.time)}"><time>${esc(m.time)}</time>${messageHtml(m, grouped)}</div>`).join("");
+  $("#logPane").innerHTML = `<div class="cylinder-nav"><button data-page="prev" aria-label="前のタブ">‹</button><div><small>${state.activeTabIndex + 1} / ${state.room.tabs.length}</small><strong>${esc(tab)}</strong></div><button data-page="next" aria-label="次のタブ">›</button></div><div class="log-page">${rows || '<p class="empty">このタブに表示できる発言がありません。</p>'}</div>`;
+  if (anchorTime) requestAnimationFrame(() => document.querySelector(`.page-row[data-time="${CSS.escape(anchorTime)}"]`)?.scrollIntoView({ block: "center" }));
+}
+function currentReadingTime() {
+  const rows = [...document.querySelectorAll(".page-row[data-time]")];
+  const targetY = Math.max(90, innerHeight * .28);
+  let best = null, distance = Infinity;
+  rows.forEach(row => { const d = Math.abs(row.getBoundingClientRect().top - targetY); if (d < distance) { distance = d; best = row; } });
+  return best?.dataset.time || "";
+}
+function switchLogPage(direction) {
+  if (!state.room?.tabs?.length) return;
+  const time = currentReadingTime(), page = $("#logPane").querySelector(".log-page");
+  page?.classList.add(direction > 0 ? "roll-left" : "roll-right");
+  setTimeout(() => {
+    state.activeTabIndex = (state.activeTabIndex + direction + state.room.tabs.length) % state.room.tabs.length;
+    renderLog(time);
+    $("#logPane").querySelector(".log-page")?.classList.add(direction > 0 ? "enter-right" : "enter-left");
+  }, 180);
 }
 function renderComments() {
   $("#commentCount").textContent = state.annotations.length;
@@ -137,20 +156,22 @@ function selectionInfo() {
   const quote = range.toString(); return { messageId: messageEl.dataset.message, startOffset: before.toString().length, endOffset: before.toString().length + quote.length, quote };
 }
 function showSelection() {
-  state.selection = selectionInfo();
-  if (state.selection?.quote.trim()) { $("#selectedQuote").textContent = `「${state.selection.quote.trim()}」`; $("#selectionBar").classList.remove("hidden"); }
-  else $("#selectionBar").classList.add("hidden");
+  const nextSelection = selectionInfo();
+  if (nextSelection?.quote.trim()) { state.selection = nextSelection; $("#selectedQuote").textContent = `「${state.selection.quote.trim()}」`; $("#selectionBar").classList.remove("hidden"); }
+  else if (!$("#commentDialog").open) $("#selectionBar").classList.add("hidden");
 }
 function fillPersonaSelect() {
   $("#personaSelect").innerHTML = `<option value="PL">${esc(state.profile.plName || "PL名を設定") }（PL）</option>` + state.profile.personas.map((p,i)=>`<option value="${i}">${esc(p.name)}（${esc(p.type)}）</option>`).join("");
 }
 function openCommentDialog() {
   if (!state.profile.plName) { openProfile(); return; }
-  fillPersonaSelect(); $("#dialogQuote").textContent = state.selection.quote; $("#commentBody").value = ""; $("#commentDialog").showModal();
+  state.pendingSelection = state.selection ? { ...state.selection } : null;
+  if (!state.pendingSelection) return;
+  fillPersonaSelect(); $("#dialogQuote").textContent = state.pendingSelection.quote; $("#commentBody").value = ""; $("#commentDialog").showModal();
 }
 async function postComment(event) {
   event.preventDefault(); const persona = currentPersona(), body = $("#commentBody").value.trim(); if (!body) return;
-  const payload = { ...state.selection, color: "yellow", authorId: state.profile.id, authorName: state.profile.plName, personaName: persona.name, personaType: persona.type, body };
+  const payload = { ...state.pendingSelection, color: "yellow", authorId: state.profile.id, authorName: state.profile.plName, personaName: persona.name, personaType: persona.type, body };
   try { await api(`/api/rooms/${encodeURIComponent(state.roomId)}/annotations`, { method:"POST", body:JSON.stringify(payload) }); $("#commentDialog").close(); getSelection()?.removeAllRanges(); $("#selectionBar").classList.add("hidden"); await refreshAnnotations(); jumpToMessage(payload.messageId); } catch(e) { alert(e.message); }
 }
 function openProfile() {
@@ -159,7 +180,7 @@ function openProfile() {
 function renderPersonas() { $("#personaList").innerHTML = state.profile.personas.map((p,i)=>`<div class="persona-row"><span>${esc(p.name)}（${esc(p.type)}）</span><button type="button" class="icon-btn" data-remove-persona="${i}">×</button></div>`).join(""); }
 function addPersona() { const name=$("#newPersonaName").value.trim(); if(!name)return; state.profile.personas.push({name,type:$("#newPersonaType").value}); $("#newPersonaName").value=""; renderPersonas(); }
 function saveProfileForm(e) { e.preventDefault(); const name=$("#plName").value.trim(); if(!name)return; state.profile.plName=name; saveProfile(); $("#profileDialog").close(); fillPersonaSelect(); }
-function jumpToMessage(id, annotationId) { const el=document.querySelector(`[data-message="${CSS.escape(id)}"]`); if(!el)return; el.scrollIntoView({behavior:"smooth",block:"center"}); el.classList.remove("flash"); requestAnimationFrame(()=>el.classList.add("flash")); if(annotationId)setTimeout(()=>document.querySelector(`[data-ann="${CSS.escape(annotationId)}"]`)?.classList.add("flash"),400); }
+function jumpToMessage(id, annotationId) { let el=document.querySelector(`[data-message="${CSS.escape(id)}"]`); if(!el&&state.room){const message=state.room.messages.find(m=>m.id===id);const index=state.room.tabs.indexOf(message?.tab);if(index>=0){state.activeTabIndex=index;renderLog(message.time);el=document.querySelector(`[data-message="${CSS.escape(id)}"]`)}} if(!el)return; el.scrollIntoView({behavior:"smooth",block:"center"}); el.classList.remove("flash"); requestAnimationFrame(()=>el.classList.add("flash")); if(annotationId)setTimeout(()=>document.querySelector(`[data-ann="${CSS.escape(annotationId)}"]`)?.classList.add("flash"),400); }
 function jumpToComment(id) { const el=$("#comment-"+CSS.escape(id)); if(!el)return; if(innerWidth<=800)$("#commentsPane").classList.add("open"); el.scrollIntoView({behavior:"smooth",block:"center"}); el.classList.add("focused"); setTimeout(()=>el.classList.remove("focused"),1500); }
 
 loadProfile();
@@ -170,8 +191,8 @@ for(const ev of ["dragenter","dragover"]){$("#dropzone").addEventListener(ev,e=>
 for(const ev of ["dragleave","drop"]){$("#dropzone").addEventListener(ev,e=>{e.preventDefault();e.currentTarget.classList.remove("drag")})}
 $("#dropzone").addEventListener("drop",e=>e.dataTransfer.files[0]&&handleFile(e.dataTransfer.files[0]));
 $("#createRoomBtn").onclick=createRoom; $("#profileBtn").onclick=openProfile; $("#addPersonaBtn").onclick=openProfile; $("#savePersonaBtn").onclick=addPersona; $("#profileForm").onsubmit=saveProfileForm; $("#commentForm").onsubmit=postComment;
-document.addEventListener("click",e=>{if(e.target.matches("[data-close]"))e.target.closest("dialog").close(); const rm=e.target.closest("[data-remove-persona]");if(rm){state.profile.personas.splice(Number(rm.dataset.removePersona),1);renderPersonas()} const mark=e.target.closest("mark[data-ann]");if(mark)jumpToComment(mark.dataset.ann); const card=e.target.closest(".comment-card");if(card)jumpToMessage(card.dataset.target,card.id.replace("comment-","")); const count=e.target.closest("[data-message-comments]");if(count){const a=state.annotations.find(x=>x.message_id===count.dataset.messageComments);if(a)jumpToComment(a.id)} const slide=e.target.closest("[data-slide]");if(slide){const panels=slide.parentElement.querySelector(".time-panels");panels.scrollBy({left:(slide.dataset.slide==="next"?1:-1)*panels.clientWidth,behavior:"smooth"})}});
+document.addEventListener("click",e=>{if(e.target.matches("[data-close]"))e.target.closest("dialog").close(); const rm=e.target.closest("[data-remove-persona]");if(rm){state.profile.personas.splice(Number(rm.dataset.removePersona),1);renderPersonas()} const mark=e.target.closest("mark[data-ann]");if(mark)jumpToComment(mark.dataset.ann); const card=e.target.closest(".comment-card");if(card)jumpToMessage(card.dataset.target,card.id.replace("comment-","")); const count=e.target.closest("[data-message-comments]");if(count){const a=state.annotations.find(x=>x.message_id===count.dataset.messageComments);if(a)jumpToComment(a.id)} const page=e.target.closest("[data-page]");if(page)switchLogPage(page.dataset.page==="next"?1:-1)});
 document.addEventListener("mouseup",()=>setTimeout(showSelection)); document.addEventListener("touchend",()=>setTimeout(showSelection,50));
-$("#markBtn").onclick=openCommentDialog; $("#tabFilter").onchange=renderLog; $("#searchInput").oninput=renderLog;
+$("#markBtn").onclick=openCommentDialog; $("#tabFilter").onchange=e=>{const index=state.room.tabs.indexOf(e.target.value);if(index>=0){state.activeTabIndex=index;renderLog()}}; $("#searchInput").oninput=()=>renderLog();
 $("#shareBtn").onclick=async()=>{await navigator.clipboard.writeText(location.href);$("#roomStatus").textContent="共有URLをコピーしました";setTimeout(()=>$("#roomStatus").textContent="",1800)};
 const roomId=new URLSearchParams(location.search).get("room"); if(roomId)openRoom(roomId);
