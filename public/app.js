@@ -1,5 +1,5 @@
 const $ = s => document.querySelector(s);
-const state = { roomId: null, room: null, annotations: [], presence: [], parsed: null, selection: null, pendingSelection: null, replyTo: null, activeTabIndex: 0, carouselPosition: 1, isSliding: false, slideQueue: 0, viewMode: localStorage.getItem("trpgMarkerViewMode") || "compact", mainTab: "", suggestionTimer: null, newPersonaIcon: "", profile: null, legacyPersonas: [], lastPersona: "PL", poller: null, presencePoller: null, isTyping: false, typingTimer: null };
+const state = { roomId: null, room: null, annotations: [], presence: [], parsed: null, selection: null, pendingSelection: null, replyTo: null, activeTabIndex: 0, carouselPosition: 1, isSliding: false, slideQueue: 0, viewMode: localStorage.getItem("trpgMarkerViewMode") || "compact", mainTab: "", hiddenTabs: new Set(), suggestionTimer: null, newPersonaIcon: "", profile: null, legacyPersonas: [], lastPersona: "PL", poller: null, presencePoller: null, isTyping: false, typingTimer: null };
 const uid = () => crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now();
 const esc = value => String(value ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
@@ -77,6 +77,7 @@ async function openRoom(id) {
   $("#roomStatus").textContent = "ログを読み込んでいます…";
   try {
     state.room = await api(`/api/rooms/${encodeURIComponent(id)}`);
+    state.hiddenTabs=new Set(JSON.parse(localStorage.getItem(`hiddenTabs:${id}`)||"[]").filter(tab=>state.room.tabs.includes(tab)));
     $("#roomTitle").textContent = state.room.title; document.title = `${state.room.title} | TRPG LOG MARKER`;
     state.room.tabs.forEach(tab => $("#tabFilter").insertAdjacentHTML("beforeend", `<option>${esc(tab)}</option>`));
     const savedMain=localStorage.getItem(`mainTab:${id}`);state.mainTab=state.room.tabs.includes(savedMain)?savedMain:(state.room.tabs.find(tab=>/^メイン$/i.test(tab))||state.room.tabs[0]||"");$("#tabFilter").value=state.mainTab;
@@ -125,6 +126,7 @@ function timelineGroups(messages) {
 function activeTabName() {
   return state.room?.tabs?.[state.activeTabIndex] || state.room?.tabs?.[0] || "";
 }
+function visibleTabEntries(){const entries=(state.room?.tabs||[]).map((tab,index)=>({tab,index})).filter(item=>!state.hiddenTabs.has(item.tab));return entries.length?entries:(state.room?.tabs||[]).slice(0,1).map((tab,index)=>({tab,index}))}
 function pagePanelHtml(tab, realIndex, trackIndex, grouped, search, clone = "") {
   const messages = state.room.messages.filter(m => m.tab === tab && (!search || `${m.speaker} ${m.text}`.toLowerCase().includes(search)));
   const rows = messages.map(m => `<div class="page-row" data-time="${esc(m.time)}"><time>${esc(m.time)}</time>${messageHtml(m, grouped)}</div>`).join("");
@@ -147,7 +149,7 @@ function hideTabSuggestions(){clearTimeout(state.suggestionTimer);$("#tabSuggest
 function visibleSuggestionTimes(){const panel=document.querySelector(`.log-page[data-track-index="${state.carouselPosition}"]`),scroll=panel?.querySelector(".page-scroll");if(!scroll)return[];const bounds=scroll.getBoundingClientRect();return [...panel.querySelectorAll(".page-row[data-time]")].filter(row=>{const rect=row.getBoundingClientRect();return rect.bottom>=bounds.top&&rect.top<=bounds.bottom&&(state.viewMode!=="timeline"||row.classList.contains("empty-slot"))}).map(row=>row.dataset.time).filter(Boolean)}
 function revealInlineSuggestions(){hideTabSuggestions();if(activeTabName()!==state.mainTab||state.viewMode!=="timeline")return;const panel=document.querySelector(`.log-page[data-track-index="${state.carouselPosition}"]`),glimpses=[...(panel?.querySelectorAll(".foreign-glimpse")||[])];glimpses.forEach((glimpse,index)=>{glimpse.classList.remove("reveal");setTimeout(()=>glimpse.classList.add("reveal"),Math.min(index*45,420))})}
 function showMainSuggestions(){revealInlineSuggestions()}
-function tabRailHtml(){return `<div class="tab-navigation"><button class="tab-arrow prev" data-page="prev" aria-label="前のタブ">‹</button><nav class="tab-rail" aria-label="タブ一覧">${state.room.tabs.map((tab,index)=>`<button type="button" data-tab-index="${index}" class="${index===state.activeTabIndex?"active":""}">${esc(tab)}</button>`).join("")}</nav><button class="tab-arrow next" data-page="next" aria-label="次のタブ">›</button></div>`}
+function tabRailHtml(){return `<div class="tab-navigation"><button class="tab-arrow prev" data-page="prev" aria-label="前のタブ">‹</button><nav class="tab-rail" aria-label="タブ一覧" title="タブ名をダブルクリックで表示／非表示">${state.room.tabs.map((tab,index)=>`<button type="button" data-tab-index="${index}" class="${index===state.activeTabIndex?"active":""} ${state.hiddenTabs.has(tab)?"tab-hidden":""}" title="ダブルクリックで${state.hiddenTabs.has(tab)?"表示":"非表示"}">${esc(tab)}</button>`).join("")}</nav><button class="tab-arrow next" data-page="next" aria-label="次のタブ">›</button></div>`}
 function syncPanelToTime(panel, time) {
   if (!panel || !time) return;
   const row = [...panel.querySelectorAll(".page-row[data-time]")].find(el => el.dataset.time === time);
@@ -157,20 +159,21 @@ function syncPanelToTime(panel, time) {
 function renderLog(anchorTime = "") {
   if (!state.room) return;
   if (state.viewMode === "timeline") { renderTimelineLog(anchorTime); return; }
-  const tabs = state.room.tabs, search = $("#searchInput").value.trim().toLowerCase(), grouped = groupAnnotations();
-  if (!tabs.length) return;
+  const entries=visibleTabEntries(),tabs=entries.map(item=>item.tab), search = $("#searchInput").value.trim().toLowerCase(), grouped = groupAnnotations();
+  if (!entries.length) return;
+  let visibleIndex=entries.findIndex(item=>item.index===state.activeTabIndex);if(visibleIndex<0){visibleIndex=0;state.activeTabIndex=entries[0].index}
   const panels = [];
-  panels.push(pagePanelHtml(tabs[tabs.length - 1], tabs.length - 1, 0, grouped, search, "last"));
-  tabs.forEach((tab, index) => panels.push(pagePanelHtml(tab, index, index + 1, grouped, search)));
-  panels.push(pagePanelHtml(tabs[0], 0, tabs.length + 1, grouped, search, "first"));
-  state.carouselPosition = state.activeTabIndex + 1;
+  panels.push(pagePanelHtml(entries.at(-1).tab,entries.at(-1).index,0,grouped,search,"last"));
+  entries.forEach((item,position)=>panels.push(pagePanelHtml(item.tab,item.index,position+1,grouped,search)));
+  panels.push(pagePanelHtml(entries[0].tab,entries[0].index,entries.length+1,grouped,search,"first"));
+  state.carouselPosition = visibleIndex + 1;
   state.isSliding = false; state.slideQueue = 0;
   $("#logPane").innerHTML = `${tabRailHtml()}<div class="carousel-viewport"><div class="page-track" id="pageTrack">${panels.join("")}</div></div>`;
   setTrackPosition(state.carouselPosition, false); updateCarouselNav();
   if (anchorTime) syncPanelToTime(document.querySelector(`.log-page[data-track-index="${state.carouselPosition}"]`), anchorTime);
   $("#pageTrack").addEventListener("transitionend", event => {
     if (event.target !== $("#pageTrack") || event.propertyName !== "transform") return;
-    const n = state.room.tabs.length;
+    const n = visibleTabEntries().length;
     if (state.carouselPosition === 0) state.carouselPosition = n;
     else if (state.carouselPosition === n + 1) state.carouselPosition = 1;
     setTrackPosition(state.carouselPosition, false);
@@ -181,15 +184,15 @@ function renderLog(anchorTime = "") {
   viewport.addEventListener("touchstart",e=>{const t=e.touches[0];touchStart={x:t.clientX,y:t.clientY}},{passive:true});
   viewport.addEventListener("touchend",e=>{if(!touchStart)return;const t=e.changedTouches[0],dx=t.clientX-touchStart.x,dy=t.clientY-touchStart.y;touchStart=null;if(Math.abs(dx)>60&&Math.abs(dx)>Math.abs(dy)*1.2)switchLogPage(dx<0?1:-1)},{passive:true});
 }
-function sharedTimelineSlots(messages){const slots=[];messages.forEach((message,index)=>{const key=message.time||`untimed-${index}`;let slot=slots[slots.length-1];if(!slot||slot.key!==key){slot={key,time:message.time,byTab:new Map()};slots.push(slot)}const list=slot.byTab.get(message.tab)||[];list.push(message);slot.byTab.set(message.tab,list)});slots.forEach(slot=>{let units=1;slot.byTab.forEach(list=>{const size=list.reduce((sum,m)=>sum+1+Math.ceil((m.text.length+(m.speaker||"").length)/45),0);units=Math.max(units,size)});const foreignCount=slot.byTab.has(state.mainTab)?0:Math.min(3,[...slot.byTab.values()].reduce((sum,list)=>sum+list.length,0));slot.height=Math.max(38,units*19+10,foreignCount?foreignCount*32+12:0)});return slots}
+function sharedTimelineSlots(messages){const slots=[];messages.filter(message=>!state.hiddenTabs.has(message.tab)).forEach((message,index)=>{const key=message.time||`untimed-${index}`;let slot=slots[slots.length-1];if(!slot||slot.key!==key){slot={key,time:message.time,byTab:new Map()};slots.push(slot)}const list=slot.byTab.get(message.tab)||[];list.push(message);slot.byTab.set(message.tab,list)});slots.forEach(slot=>{let units=1;slot.byTab.forEach(list=>{const size=list.reduce((sum,m)=>sum+Math.max(1,Math.ceil((m.text.length+(m.speaker||"").length)/100)),0);units=Math.max(units,size)});const foreignCount=Math.min(3,[...slot.byTab.entries()].filter(([tab])=>tab!==state.mainTab).reduce((sum,[,list])=>sum+list.length,0)),base=Math.max(30,units*16+8),foreignHeight=foreignCount?foreignCount*29+8:0;slot.height=slot.byTab.has(state.mainTab)&&foreignCount?base+foreignHeight:Math.max(base,foreignHeight)});return slots}
 function timelinePagePanelHtml(tab,realIndex,trackIndex,slots,grouped,search,clone=""){const rows=slots.map(slot=>{const list=(slot.byTab.get(tab)||[]).filter(m=>!search||`${m.speaker} ${m.text}`.toLowerCase().includes(search));const foreign=tab===state.mainTab?[...slot.byTab.entries()].filter(([otherTab])=>otherTab!==tab).flatMap(([otherTab,messages])=>messages.filter(m=>!search||`${m.speaker} ${m.text}`.toLowerCase().includes(search)).slice(0,2).map(m=>`<div class="foreign-glimpse"><b>${esc(otherTab)}</b><span>${esc(m.speaker||"")}${m.speaker?"：":""}${esc(m.text.slice(0,140))}</span></div>`)).slice(0,3).join(""):"";return `<div class="page-row timeline-slot ${list.length?"has-message":"empty-slot"}" data-time="${esc(slot.time)}" style="height:${slot.height}px"><time>${esc(slot.time)}</time><div class="timeline-slot-content">${list.map(m=>messageHtml(m,grouped)).join("")}${foreign?`<div class="foreign-glimpses">${foreign}</div>`:""}</div></div>`}).join("");return `<section class="log-page" data-real-index="${realIndex}" data-track-index="${trackIndex}" data-clone="${clone}"><div class="page-scroll timeline-page">${rows}</div></section>`}
 function renderTimelineLog(anchorTime="") {
-  const tabs=state.room.tabs,search=$("#searchInput").value.trim().toLowerCase(),grouped=groupAnnotations(),slots=sharedTimelineSlots(state.room.messages);if(!tabs.length)return;
-  const panels=[timelinePagePanelHtml(tabs[tabs.length-1],tabs.length-1,0,slots,grouped,search,"last")];tabs.forEach((tab,index)=>panels.push(timelinePagePanelHtml(tab,index,index+1,slots,grouped,search)));panels.push(timelinePagePanelHtml(tabs[0],0,tabs.length+1,slots,grouped,search,"first"));
-  state.carouselPosition=state.activeTabIndex+1;state.isSliding=false;state.slideQueue=0;
+  const entries=visibleTabEntries(),search=$("#searchInput").value.trim().toLowerCase(),grouped=groupAnnotations(),slots=sharedTimelineSlots(state.room.messages);if(!entries.length)return;let visibleIndex=entries.findIndex(item=>item.index===state.activeTabIndex);if(visibleIndex<0){visibleIndex=0;state.activeTabIndex=entries[0].index}
+  const panels=[timelinePagePanelHtml(entries.at(-1).tab,entries.at(-1).index,0,slots,grouped,search,"last")];entries.forEach((item,position)=>panels.push(timelinePagePanelHtml(item.tab,item.index,position+1,slots,grouped,search)));panels.push(timelinePagePanelHtml(entries[0].tab,entries[0].index,entries.length+1,slots,grouped,search,"first"));
+  state.carouselPosition=visibleIndex+1;state.isSliding=false;state.slideQueue=0;
   $("#logPane").innerHTML=`${tabRailHtml()}<div class="carousel-viewport"><div class="page-track" id="pageTrack">${panels.join("")}</div></div>`;
   setTrackPosition(state.carouselPosition,false);updateCarouselNav();if(anchorTime)syncPanelToTime(document.querySelector(`.log-page[data-track-index="${state.carouselPosition}"]`),anchorTime);
-  $("#pageTrack").addEventListener("transitionend",event=>{if(event.target!==$("#pageTrack")||event.propertyName!=="transform")return;const n=state.room.tabs.length;if(state.carouselPosition===0)state.carouselPosition=n;else if(state.carouselPosition===n+1)state.carouselPosition=1;setTrackPosition(state.carouselPosition,false);state.isSliding=false;if(state.slideQueue){const queued=state.slideQueue;state.slideQueue=0;requestAnimationFrame(()=>switchLogPage(queued))}});
+  $("#pageTrack").addEventListener("transitionend",event=>{if(event.target!==$("#pageTrack")||event.propertyName!=="transform")return;const n=visibleTabEntries().length;if(state.carouselPosition===0)state.carouselPosition=n;else if(state.carouselPosition===n+1)state.carouselPosition=1;setTrackPosition(state.carouselPosition,false);state.isSliding=false;if(state.slideQueue){const queued=state.slideQueue;state.slideQueue=0;requestAnimationFrame(()=>switchLogPage(queued))}});
   const viewport=$(".carousel-viewport");let touchStart=null;viewport.addEventListener("touchstart",e=>{const t=e.touches[0];touchStart={x:t.clientX,y:t.clientY}},{passive:true});viewport.addEventListener("touchend",e=>{if(!touchStart)return;const t=e.changedTouches[0],dx=t.clientX-touchStart.x,dy=t.clientY-touchStart.y;touchStart=null;if(Math.abs(dx)>60&&Math.abs(dx)>Math.abs(dy)*1.2)switchLogPage(dx<0?1:-1)},{passive:true});
 }
 function currentReadingTime() {
@@ -202,12 +205,12 @@ function currentReadingTime() {
   return best?.dataset.time || "";
 }
 function switchLogPage(direction) {
-  if (!state.room?.tabs?.length) return;
+  const entries=visibleTabEntries();if (!entries.length) return;
   if (state.isSliding) { state.slideQueue = direction < 0 ? -1 : 1; return; }
   state.isSliding = true;
-  const time = currentReadingTime(), n = state.room.tabs.length;
+  const time = currentReadingTime(), n = entries.length;let visibleIndex=entries.findIndex(item=>item.index===state.activeTabIndex);if(visibleIndex<0)visibleIndex=0;
   state.carouselPosition += direction;
-  state.activeTabIndex = (state.activeTabIndex + direction + n) % n;
+  visibleIndex=(visibleIndex+direction+n)%n;state.activeTabIndex=entries[visibleIndex].index;
   const target = document.querySelector(`.log-page[data-track-index="${state.carouselPosition}"]`);
   syncPanelToTime(target, time);
   if(state.carouselPosition===0)syncPanelToTime(document.querySelector(`.log-page[data-track-index="${n}"]`),time);
@@ -215,7 +218,8 @@ function switchLogPage(direction) {
   updateCarouselNav(); setTrackPosition(state.carouselPosition, true);
   if(activeTabName()===state.mainTab)setTimeout(revealInlineSuggestions,80);else hideTabSuggestions();
 }
-function goToTab(index){if(!state.room?.tabs?.[index]||index===state.activeTabIndex)return;const time=currentReadingTime();state.isSliding=true;state.slideQueue=0;state.activeTabIndex=index;state.carouselPosition=index+1;syncPanelToTime(document.querySelector(`.log-page[data-track-index="${state.carouselPosition}"]`),time);updateCarouselNav();setTrackPosition(state.carouselPosition,true);if(activeTabName()===state.mainTab)setTimeout(revealInlineSuggestions,80);else hideTabSuggestions()}
+function goToTab(index){const tab=state.room?.tabs?.[index],entries=visibleTabEntries();if(!tab||state.hiddenTabs.has(tab)||index===state.activeTabIndex)return;const position=entries.findIndex(item=>item.index===index);if(position<0)return;const time=currentReadingTime();state.isSliding=true;state.slideQueue=0;state.activeTabIndex=index;state.carouselPosition=position+1;syncPanelToTime(document.querySelector(`.log-page[data-track-index="${state.carouselPosition}"]`),time);updateCarouselNav();setTrackPosition(state.carouselPosition,true);if(activeTabName()===state.mainTab)setTimeout(revealInlineSuggestions,80);else hideTabSuggestions()}
+function toggleTabVisibility(index){const tab=state.room?.tabs?.[index];if(!tab)return;if(state.hiddenTabs.has(tab)){state.hiddenTabs.delete(tab)}else{if(visibleTabEntries().length<=1)return;state.hiddenTabs.add(tab)}localStorage.setItem(`hiddenTabs:${state.roomId}`,JSON.stringify([...state.hiddenTabs]));if(state.hiddenTabs.has(activeTabName()))state.activeTabIndex=visibleTabEntries()[0].index;renderLog(currentReadingTime())}
 function renderComments() {
   $("#commentCount").textContent = state.annotations.length;
   const order=new Map(state.room.messages.map((message,index)=>[message.id,index]));
@@ -299,6 +303,7 @@ $("#dropzone").addEventListener("drop",e=>e.dataTransfer.files[0]&&handleFile(e.
 $("#createRoomBtn").onclick=createRoom; $("#profileBtn").onclick=openProfile; $("#savePersonaBtn").onclick=addPersona; $("#profileForm").onsubmit=saveProfileForm; $("#commentForm").onsubmit=postComment;
 document.addEventListener("click",e=>{if(e.target.matches("[data-close]"))e.target.closest("dialog").close(); const rm=e.target.closest("[data-remove-persona]");if(rm){state.profile.personas.splice(Number(rm.dataset.removePersona),1);saveProfile();renderPersonas()} const mark=e.target.closest("mark[data-ann]");if(mark)jumpToComment(mark.dataset.ann);const reply=e.target.closest("[data-reply-comment]");if(reply){const annotation=state.annotations.find(item=>item.id===reply.dataset.replyComment);openReplyDialog(annotation,reply.closest(".comment-card").getBoundingClientRect())} const card=e.target.closest(".comment-card");if(card&&!reply)jumpToMessage(card.dataset.target,card.id.replace("comment-","")); const count=e.target.closest("[data-message-comments]");if(count){const a=state.annotations.find(x=>x.message_id===count.dataset.messageComments&&!x.parent_id);if(a)jumpToComment(a.id)} const page=e.target.closest("[data-page]");if(page)switchLogPage(page.dataset.page==="next"?1:-1)});
 document.addEventListener("click",e=>{const tab=e.target.closest("[data-tab-index]");if(tab)goToTab(Number(tab.dataset.tabIndex))});
+document.addEventListener("dblclick",e=>{const tab=e.target.closest(".tab-rail [data-tab-index]");if(!tab)return;e.preventDefault();e.stopPropagation();toggleTabVisibility(Number(tab.dataset.tabIndex))});
 document.addEventListener("click",e=>{const suggestion=e.target.closest("[data-suggest-message]");if(!suggestion)return;hideTabSuggestions();jumpToMessage(suggestion.dataset.suggestMessage)});
 document.addEventListener("change",async e=>{if(e.target.matches("[data-persona-icon]")){const i=Number(e.target.dataset.personaIcon);state.profile.personas[i].icon=await resizeIcon(e.target.files[0]);saveProfile();renderPersonas()}});
 document.addEventListener("change",e=>{if(e.target.matches("[data-persona-color]")){const persona=state.profile.personas[Number(e.target.dataset.personaColor)];persona.color=e.target.value;saveProfile();syncPersonaColor(persona)}});
