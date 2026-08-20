@@ -68,9 +68,11 @@ async function createRoom() {
   try {
     const result = await api("/api/rooms", { method: "POST", body: JSON.stringify(state.parsed) });
     localStorage.setItem(`admin:${result.id}`, result.adminToken);
+    const owned=JSON.parse(localStorage.getItem("trpgMarkerOwnedRooms")||"{}");owned[result.id]={title:state.parsed.title,createdAt:new Date().toISOString()};localStorage.setItem("trpgMarkerOwnedRooms",JSON.stringify(owned));
     location.href = `/?room=${encodeURIComponent(result.id)}`;
   } catch (e) { $("#homeStatus").textContent = e.message; btn.disabled = false; btn.textContent = "秘密の部屋を作る"; }
 }
+async function renderOwnedRooms(){const ids=[];for(let i=0;i<localStorage.length;i++){const key=localStorage.key(i);if(key?.startsWith("admin:"))ids.push(key.slice(6))}const box=$("#ownedRooms"),list=$("#ownedRoomList");if(!ids.length){box.classList.add("hidden");return}const saved=JSON.parse(localStorage.getItem("trpgMarkerOwnedRooms")||"{}"),rooms=await Promise.all(ids.map(async id=>{try{const room=await api(`/api/rooms/${encodeURIComponent(id)}?summary=1`);return{id,title:room.title,createdAt:room.createdAt,available:true}}catch{return{id,title:saved[id]?.title||"読み込めない部屋",createdAt:saved[id]?.createdAt||"",available:false}}}));rooms.sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));list.innerHTML=rooms.map(room=>`<a class="owned-room ${room.available?"":"unavailable"}" href="/?room=${encodeURIComponent(room.id)}"><span><b>${esc(room.title)}</b><small>${room.createdAt?esc(formatCommentDate(room.createdAt)):""}</small></span><i>${room.available?"開く ›":"確認できません"}</i></a>`).join("");box.classList.remove("hidden")}
 
 async function openRoom(id) {
   state.roomId = id; loadRoomPersonas(id); $("#homeView").classList.add("hidden"); $("#roomView").classList.remove("hidden"); $("#profileBtn").classList.remove("hidden");
@@ -314,8 +316,8 @@ $("#newPersonaIcon").onchange=async e=>{state.newPersonaIcon=await resizeIcon(e.
 document.addEventListener("pointerdown",e=>{const dialog=$("#commentDialog");if(!dialog.open||dialog.contains(e.target))return;if($("#commentBody").value.trim())$("#commentForm").requestSubmit();else dialog.close()});
 $("#commentBody").addEventListener("input",()=>setTyping(true));
 $("#commentDialog").addEventListener("close",()=>setTyping(false));
-document.addEventListener("keydown",e=>{if(e.defaultPrevented||e.altKey||e.ctrlKey||e.metaKey)return;const target=e.target;if(target?.matches?.("input, textarea, select")||target?.isContentEditable)return;if(e.key==="ArrowLeft"||e.key==="ArrowRight"){e.preventDefault();switchLogPage(e.key==="ArrowRight"?1:-1)}});
+document.addEventListener("keydown",e=>{if(e.defaultPrevented||e.altKey||e.ctrlKey||e.metaKey)return;const target=e.target;if(target?.matches?.("input, textarea, select")||target?.isContentEditable)return;if(e.key==="ArrowLeft"||e.key==="ArrowRight"){e.preventDefault();switchLogPage(e.key==="ArrowRight"?1:-1);return}if(e.key==="ArrowUp"||e.key==="ArrowDown"){const panel=document.querySelector(`.log-page[data-track-index="${state.carouselPosition}"] .page-scroll`);if(!panel)return;e.preventDefault();panel.scrollBy({top:(e.key==="ArrowDown"?1:-1)*Math.max(72,panel.clientHeight*.12),behavior:"smooth"})}});
 document.addEventListener("mouseup",()=>setTimeout(showSelection)); document.addEventListener("touchend",()=>setTimeout(showSelection,50));
 $("#markBtn").onclick=openCommentDialog; $("#viewMode").value=state.viewMode; $("#viewMode").onchange=e=>{const time=currentReadingTime();state.viewMode=e.target.value;localStorage.setItem("trpgMarkerViewMode",state.viewMode);renderLog(time);setTimeout(revealInlineSuggestions,20)}; $("#tabFilter").onchange=e=>{const time=currentReadingTime();state.mainTab=e.target.value;localStorage.setItem(`mainTab:${state.roomId}`,state.mainTab);renderLog(time);setTimeout(revealInlineSuggestions,20)}; $("#searchInput").oninput=()=>{const time=currentReadingTime();renderLog(time);setTimeout(revealInlineSuggestions,20)};
 $("#shareBtn").onclick=async()=>{await navigator.clipboard.writeText(location.href);$("#roomStatus").textContent="共有URLをコピーしました";setTimeout(()=>$("#roomStatus").textContent="",1800)};
-const roomId=new URLSearchParams(location.search).get("room"); if(roomId)openRoom(roomId);
+const roomId=new URLSearchParams(location.search).get("room"); if(roomId)openRoom(roomId);else renderOwnedRooms();

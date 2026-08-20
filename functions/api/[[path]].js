@@ -57,6 +57,7 @@ export async function onRequest(context) {
   if (method === "GET" && parts[0] === "rooms" && parts[1] && parts.length === 2) {
     const room = await env.DB.prepare("SELECT id,title,log_json,created_at FROM rooms WHERE id=?").bind(parts[1]).first();
     if (!room) return json({ error: "部屋が見つかりません" }, 404);
+    if(new URL(request.url).searchParams.get("summary")==="1")return json({id:room.id,title:room.title,createdAt:room.created_at});
     const log = JSON.parse(room.log_json);
     if(log.chunked){await ensureLogChunksTable(env.DB);const indexRows=await env.DB.prepare("SELECT chunk_index FROM room_log_chunks WHERE room_id=? ORDER BY chunk_index").bind(parts[1]).all();log.messages=[];for(const item of indexRows.results||[]){const row=await env.DB.prepare("SELECT messages_json FROM room_log_chunks WHERE room_id=? AND chunk_index=?").bind(parts[1],item.chunk_index).first();if(row?.messages_json)log.messages.push(...JSON.parse(row.messages_json))}}
     return json({ id: room.id, title: room.title, createdAt: room.created_at, ...log });
