@@ -76,8 +76,11 @@
       <div class="comment-persona-picker"><span id="commentPersonaAvatar" class="comment-input-avatar"></span><select id="personaSelect" aria-label="発言者"></select></div>
       <textarea id="commentBody" rows="5" maxlength="4000" aria-label="感想"></textarea>
       <div class="comment-image-row"><label class="comment-image-add">＋ 画像<input id="commentImageInput" type="file" accept="image/*"></label><div id="commentImagePreview" class="comment-image-preview hidden"></div><button id="commentImageRemove" class="comment-image-remove hidden" type="button" title="画像を外す">×</button></div>
+      <button id="commentDeleteBtn" class="comment-edit-delete hidden" type="button">このコメントを削除</button>
     </form>
   </dialog>
+
+  <dialog id="imageDialog" class="image-dialog"><button type="button" class="image-dialog-close" data-close aria-label="閉じる">×</button><img id="expandedCommentImage" alt="コメント画像"></dialog>
 
   <dialog id="profileDialog">
     <form id="profileForm" method="dialog">

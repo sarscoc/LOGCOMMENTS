@@ -25,6 +25,9 @@ const ensureAnnotationColumns = async db => {
   if(!names.has("parent_id")){try{await db.prepare("ALTER TABLE annotations ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''").run()}catch(error){if(!String(error).includes("duplicate column"))throw error}}
   if(!names.has("image_data")){try{await db.prepare("ALTER TABLE annotations ADD COLUMN image_data TEXT NOT NULL DEFAULT ''").run()}catch(error){if(!String(error).includes("duplicate column"))throw error}}
 };
+const ensureAnnotationLikes = async db => {
+  await db.prepare("CREATE TABLE IF NOT EXISTS annotation_likes (annotation_id TEXT NOT NULL,author_id TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(annotation_id,author_id))").run();
+};
 const ensureLogChunksTable = async db => {
   await db.prepare(`CREATE TABLE IF NOT EXISTS room_log_chunks (room_id TEXT NOT NULL,chunk_index INTEGER NOT NULL,messages_json TEXT NOT NULL,PRIMARY KEY (room_id,chunk_index),FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE)`).run();
 };
@@ -68,6 +71,7 @@ export async function onRequest(context) {
 
   if (parts[0] === "rooms" && parts[1] && parts[2] === "annotations") {
     await ensureAnnotationColumns(env.DB);
+    await ensureAnnotationLikes(env.DB);
     const roomId = parts[1];
     if(method==="GET"&&parts[3]&&parts[4]==="image"){
       const row=await env.DB.prepare("SELECT image_data FROM annotations WHERE room_id=? AND id=?").bind(roomId,parts[3]).first();
@@ -78,10 +82,11 @@ export async function onRequest(context) {
       return new Response(bytes,{headers:{"content-type":match[1],"cache-control":"private, max-age=31536000, immutable"}});
     }
     if (method === "GET") {
-      const result = await env.DB.prepare("SELECT id,room_id,message_id,end_message_id,parent_id,start_offset,end_offset,quote,color,author_id,author_name,persona_name,persona_type,persona_icon,body,created_at,CASE WHEN image_data<>'' THEN 1 ELSE 0 END AS has_image FROM annotations WHERE room_id=? ORDER BY created_at,id").bind(roomId).all();
+      const viewer=new URL(request.url).searchParams.get("authorId")||"";
+      const result = await env.DB.prepare("SELECT a.id,a.room_id,a.message_id,a.end_message_id,a.parent_id,a.start_offset,a.end_offset,a.quote,a.color,a.author_id,a.author_name,a.persona_name,a.persona_type,a.persona_icon,a.body,a.created_at,CASE WHEN a.image_data<>'' THEN 1 ELSE 0 END AS has_image,(SELECT COUNT(*) FROM annotation_likes l WHERE l.annotation_id=a.id) AS like_count,EXISTS(SELECT 1 FROM annotation_likes l WHERE l.annotation_id=a.id AND l.author_id=?) AS liked_by_me FROM annotations a WHERE a.room_id=? ORDER BY a.created_at,a.id").bind(viewer,roomId).all();
       return json({ annotations: result.results || [] });
     }
-    if (method === "POST") {
+    if (method === "POST" && parts.length === 3) {
       const body = await safeBody(request);
       const required = ["messageId", "quote", "authorName", "personaName", "personaType"];
       const missing = !body ? required : required.filter(key => body[key] == null || String(body[key]).trim() === "");
@@ -101,7 +106,13 @@ export async function onRequest(context) {
       const row = await env.DB.prepare("SELECT * FROM annotations WHERE id=?").bind(id).first();
       return json(row, 201);
     }
-    if(method==="DELETE"&&parts[3]){const body=await safeBody(request),annotation=await env.DB.prepare("SELECT author_id FROM annotations WHERE room_id=? AND id=?").bind(roomId,parts[3]).first();if(!annotation)return json({error:"コメントが見つかりません"},404);const room=await env.DB.prepare("SELECT admin_token FROM rooms WHERE id=?").bind(roomId).first(),isAdmin=room&&request.headers.get("x-admin-token")===room.admin_token;if(!isAdmin&&(!body?.authorId||String(body.authorId)!==annotation.author_id))return json({error:"自分のコメントだけ削除できます"},403);await env.DB.prepare(`WITH RECURSIVE descendants(id) AS (SELECT id FROM annotations WHERE room_id=? AND id=? UNION ALL SELECT a.id FROM annotations a JOIN descendants d ON a.parent_id=d.id WHERE a.room_id=?) DELETE FROM annotations WHERE room_id=? AND id IN (SELECT id FROM descendants)`).bind(roomId,parts[3],roomId,roomId).run();return json({ok:true})}
+    if(method==="POST"&&parts[3]&&parts[4]==="like"){const body=await safeBody(request),authorId=String(body?.authorId||"").slice(0,100);if(!authorId)return json({error:"参加者情報が必要です"},400);const exists=await env.DB.prepare("SELECT id FROM annotations WHERE room_id=? AND id=?").bind(roomId,parts[3]).first();if(!exists)return json({error:"コメントが見つかりません"},404);const liked=await env.DB.prepare("SELECT 1 FROM annotation_likes WHERE annotation_id=? AND author_id=?").bind(parts[3],authorId).first();if(liked)await env.DB.prepare("DELETE FROM annotation_likes WHERE annotation_id=? AND author_id=?").bind(parts[3],authorId).run();else await env.DB.prepare("INSERT INTO annotation_likes(annotation_id,author_id) VALUES(?,?)").bind(parts[3],authorId).run();return json({liked:!liked})}
+    if(method==="DELETE"&&parts[3]){const body=await safeBody(request),annotation=await env.DB.prepare("SELECT author_id FROM annotations WHERE room_id=? AND id=?").bind(roomId,parts[3]).first();if(!annotation)return json({error:"コメントが見つかりません"},404);const room=await env.DB.prepare("SELECT admin_token FROM rooms WHERE id=?").bind(roomId).first(),isAdmin=room&&request.headers.get("x-admin-token")===room.admin_token;if(!isAdmin&&(!body?.authorId||String(body.authorId)!==annotation.author_id))return json({error:"自分のコメントだけ削除できます"},403);await env.DB.prepare("DELETE FROM annotation_likes WHERE annotation_id IN (WITH RECURSIVE descendants(id) AS (SELECT id FROM annotations WHERE room_id=? AND id=? UNION ALL SELECT a.id FROM annotations a JOIN descendants d ON a.parent_id=d.id WHERE a.room_id=?) SELECT id FROM descendants)").bind(roomId,parts[3],roomId).run();await env.DB.prepare(`WITH RECURSIVE descendants(id) AS (SELECT id FROM annotations WHERE room_id=? AND id=? UNION ALL SELECT a.id FROM annotations a JOIN descendants d ON a.parent_id=d.id WHERE a.room_id=?) DELETE FROM annotations WHERE room_id=? AND id IN (SELECT id FROM descendants)`).bind(roomId,parts[3],roomId,roomId).run();return json({ok:true})}
+    if(method==="PATCH"&&parts[3]&&parts[3]!=="color"){
+      const body=await safeBody(request),annotation=await env.DB.prepare("SELECT author_id,image_data FROM annotations WHERE room_id=? AND id=?").bind(roomId,parts[3]).first();if(!annotation)return json({error:"コメントが見つかりません"},404);if(!body?.authorId||String(body.authorId)!==annotation.author_id)return json({error:"自分のコメントだけ編集できます"},403);
+      const imageData=body.imageData===null?annotation.image_data:String(body.imageData||"").slice(0,700000),text=String(body.body||"").trim();if(!text&&!imageData)return json({error:"感想または画像を入力してください"},400);
+      await env.DB.prepare("UPDATE annotations SET body=?,color=?,persona_name=?,persona_type=?,persona_icon=?,image_data=? WHERE room_id=? AND id=?").bind(text.slice(0,4000),String(body.color||"yellow").slice(0,40),String(body.personaName||"").slice(0,80),String(body.personaType||"").slice(0,20),String(body.personaIcon||"").slice(0,100000),imageData,roomId,parts[3]).run();return json({ok:true});
+    }
     if(method==="PATCH"&&parts[3]==="color"){
       const body=await safeBody(request),color=String(body?.color||"");
       if(!body?.authorId||!body?.personaName||!body?.personaType||!color)return json({error:"色の更新情報が足りません"},400);

@@ -30,6 +30,13 @@ CREATE TABLE IF NOT EXISTS annotations (
 CREATE INDEX IF NOT EXISTS idx_annotations_room_created
 ON annotations(room_id, created_at);
 
+CREATE TABLE IF NOT EXISTS annotation_likes (
+  annotation_id TEXT NOT NULL,
+  author_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (annotation_id, author_id)
+);
+
 CREATE TABLE IF NOT EXISTS presence (
   room_id TEXT NOT NULL,
   author_id TEXT NOT NULL,
