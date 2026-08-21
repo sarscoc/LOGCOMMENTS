@@ -61,10 +61,18 @@ export class RoomHub extends DurableObject {
   }
 }
 
+const runCleanup=async env=>{
+  if(!env.CLEANUP_SECRET)return;
+  const url=env.CLEANUP_URL||"https://logcomments.pages.dev/api/maintenance/cleanup";
+  const response=await fetch(url,{method:"POST",headers:{"x-cleanup-secret":env.CLEANUP_SECRET}});
+  if(!response.ok)throw new Error(`cleanup failed: ${response.status}`);
+};
+
 export default {
   fetch(request){
     const url=new URL(request.url);
     if(url.pathname==="/health")return json({ok:true,service:"TRPG LOG MARKER realtime"});
     return new Response("This Worker is used through the Pages Durable Object binding.",{status:404});
-  }
+  },
+  scheduled(controller,env,ctx){ctx.waitUntil(runCleanup(env))}
 };
