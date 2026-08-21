@@ -43,7 +43,7 @@ export async function onRequest(context) {
   }
 
   const rows = await env.DB.prepare(
-    "SELECT id,log_json,created_at FROM rooms WHERE created_at <= datetime('now','-7 days') ORDER BY created_at ASC LIMIT 100"
+    "SELECT id,log_json,created_at,last_activity_at FROM rooms WHERE COALESCE(NULLIF(last_activity_at,''),created_at) <= datetime('now','-7 days') ORDER BY COALESCE(NULLIF(last_activity_at,''),created_at) ASC LIMIT 100"
   ).all();
 
   let deleted = 0;
