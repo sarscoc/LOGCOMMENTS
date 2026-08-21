@@ -50,9 +50,48 @@ Tekeyの全タブHTMLログを読み込み、秘密の共有URL上で本文へ�
 - 接続中の定期的なコメント確認・入室確認を廃止
 - 別タブ候補は画面内に見えている時刻行だけ遅延生成
 - 推測困難な共有URL
-- 通常利用者はクラウド上に最大5部屋まで作成可能
+- 通常利用者はクラウド上に1人1部屋まで作成可能
+- 部屋は作成から7日で期限切れになり、自動削除
 - 部屋を、閲覧用HTMLと再読込用データをまとめたZIPとして保存
 - 削除前に「保存して削除／削除だけ／キャンセル」を選択可能
+
+## 保存・リアルタイムの役割分担
+
+このアプリは、保存とリアルタイム通知を分離しています。
+
+- **D1**: 部屋情報、コメント、返信、♡などの確実に残すデータ
+- **R2**: ログ本文と、重複排除した発言者アイコン
+- **Durable Object**: その部屋を今開いている人、入力中状態、更新通知だけを担当
+- **WebSocket**: 開いているブラウザへイベントを即時配信
+
+Durable Objectにはコメント本文やログ本文を保存しません。リアルタイム通知が一時的に切れてもD1/R2側の保存データは失われず、再接続後に取りこぼした更新を取得します。
+
+### なぜ定期ポーリングより軽いのか
+
+以前の3秒・20秒ごとの定期確認は廃止し、通常時はWebSocketを1本だけ接続します。
+
+- 接続時にWebSocket Upgradeが発生
+- 入室・入力中・コメント投稿・編集・削除・♡など、何か起きた時だけ通信
+- サーバーから接続中クライアントへのWebSocket送信はDurable Objectsのリクエスト課金対象外
+- Durable Objectsへ入るWebSocketメッセージは、リクエスト課金上20メッセージ＝1リクエスト相当で計算
+- Hibernation APIを使っているため、アイドル状態でhibernate可能な時間はDurable ObjectのDuration課金対象外
+- 何も操作されていない間に3秒ごとの確認を繰り返さない
+
+Cloudflare Workers Free planのDurable Objectsはリクエストが1日100,000までです。WebSocketの初回接続は1リクエストとして数えられ、受信WebSocketメッセージには20:1の課金比率が適用されます。なお、このアプリではD1保存成功後にPagesからDurable Objectへ更新通知を送る処理もあるため、コメント等の各更新がすべて20:1になるわけではありません。それでも、常時ポーリングする方式より通信回数を大幅に抑えられます。
+
+Cloudflare公式: https://developers.cloudflare.com/durable-objects/platform/pricing/
+
+## 部屋数と7日自動削除
+
+通常利用者は、クラウド上に**有効な部屋を1部屋だけ**持てます。サイト所有者は `SITE_OWNER_KEY` によりこの部屋数制限を回避できます。
+
+部屋は `created_at` を基準に作成から7日で期限切れになります。7日を過ぎた部屋はAPI上ですぐ利用不可になり、Realtime WorkerのCronが1時間ごとに期限切れ部屋を掃除します。削除対象はR2の部屋ログ、D1のコメント、♡、presence、旧ログチャンク、部屋情報です。重複排除されたアイコン本体は複数部屋から参照される可能性があるため、部屋削除時には直接削除しません。
+
+### 既存部屋を持っている場合
+
+この変更をデプロイした時点で、既存の2部屋目以降を突然削除することはしません。既存部屋はそれぞれの作成日時から7日になるまで利用でき、その後に期限切れになります。ただし、通常利用者は有効な既存部屋が1つでも残っている間、新しい部屋を追加作成できません。
+
+保存したい部屋は、期限前に「部屋を保存」からZIPを作成してください。保存ZIPはクラウドの部屋数やD1/R2容量を消費せず、オフラインで閲覧できます。
 
 ## Cloudflare Pagesへの公開
 
@@ -62,11 +101,11 @@ Tekeyの全タブHTMLログを読み込み、秘密の共有URL上で本文へ�
 
 ### 1. GitHubへ入れる
 
-このフォルダの中身を、新しいGitHubリポジトリへアップロードします。
+このフォルダの中身をGitHubリポジトリへアップロードします。
 
 ### 2. Pagesプロジェクトを作る
 
-Cloudflare Dashboardで `Workers & Pages` → `Create` → `Pages` → `Connect to Git` と進み、上のリポジトリを選びます。
+Cloudflare Dashboardで `Workers & Pages` → `Create` → `Pages` → `Connect to Git` と進み、リポジトリを選びます。
 
 - Framework preset: `None`
 - Build command: 空欄
@@ -107,7 +146,7 @@ Cloudflare Dashboardの `Workers & Pages` → `Create` からGitHubリポジト�
 - Root directory: `realtime-worker`
 - Deploy command: `npx wrangler deploy`
 
-`realtime-worker/wrangler.jsonc` がDurable Object namespaceを自動作成します。Pagesプロジェクトとは別のWorkerとしてデプロイしてください。
+`realtime-worker/wrangler.jsonc` がDurable Object namespaceと1時間ごとのCron Triggerを作成します。Pagesプロジェクトとは別のWorkerとしてデプロイしてください。
 
 ### 7. PagesとDurable Objectを接続する
 
@@ -116,11 +155,27 @@ Pagesプロジェクト `logcomments` の `Settings` → `Bindings` → `Add` �
 - Variable name: `ROOMS`
 - Durable Object namespace: `trpg-log-marker-realtime` の `RoomHub`
 
-必ず `ROOMS` という大文字のBinding名にしてください。Productionへ追加したあと、Pagesを再デプロイします。URLや共有シークレットの設定は不要です。
+必ず `ROOMS` という大文字のBinding名にしてください。Productionへ追加したあと、Pagesを再デプロイします。Realtime接続用URLや共有シークレットは不要です。
 
 接続に成功すると、通常時の定期通信は止まり、入退室・入力中・コメント・編集・削除・♡・返信が起きた時だけ通信します。Bindingが未設定または一時切断中でも、コメント機能そのものは止まらず、60秒間隔の保険確認へ切り替わります。
 
-### 8. サイト所有者だけ部屋数を無制限にする
+### 8. 7日自動削除用Secretを設定する
+
+期限切れ部屋の削除APIは外部から勝手に実行できないよう、PagesとRealtime Workerの両方へ同じSecretを設定します。
+
+Pagesプロジェクトの `Settings` → `Variables and Secrets` でSecretを追加します。
+
+- Variable name: `CLEANUP_SECRET`
+- Value: 十分長いランダム文字列
+
+次に `trpg-log-marker-realtime` Workerの `Settings` → `Variables and Secrets` にも、**同じ値**で追加します。
+
+- Variable name: `CLEANUP_SECRET`
+- Value: Pages側と同じ文字列
+
+SecretはGitHubへ書かないでください。設定後、PagesとRealtime Workerを再デプロイします。`realtime-worker/wrangler.jsonc` のCronが毎時17分に削除APIを呼びます。
+
+### 9. サイト所有者だけ部屋数を無制限にする
 
 Pagesプロジェクトの `Settings` → `Variables and Secrets` で、暗号化したSecretを追加します。
 
@@ -140,8 +195,8 @@ Pagesプロジェクトの `Settings` → `Variables and Secrets` で、暗号�
 
 ## 注意
 
-共有URLは十分長く推測困難ですが、URLを転送された相手も閲覧できます。ログ本文と重複排除した発言者アイコンはCloudflare R2へ、部屋情報・感想本文・♡などはD1へ保存されます。Durable Objectはリアルタイム通知だけを担当し、コメント本文は保存しません。5部屋制限はアカウント認証ではなく、このブラウザ内の利用者IDを基準にする簡易的な制限です。
+共有URLは十分長く推測困難ですが、URLを転送された相手も閲覧できます。ログ本文と重複排除した発言者アイコンはCloudflare R2へ、部屋情報・感想本文・♡などはD1へ保存されます。Durable Objectはリアルタイム通知だけを担当し、コメント本文は保存しません。1部屋制限はアカウント認証ではなく、このブラウザ内の利用者IDを基準にする簡易的な制限です。
 
 ## 以前の版から更新する場合
 
-不足している列やテーブルはアプリが自動補完します。新しいファイルをGitHubへ上書きし、Cloudflareの再デプロイ完了後にサイトを再読み込みしてください。
+不足している列やテーブルはアプリが自動補完します。新しいファイルをGitHubへ反映し、Cloudflareの再デプロイ完了後にサイトを再読み込みしてください。既存部屋は即時削除せず、それぞれの作成日時から7日後に期限切れになります。
