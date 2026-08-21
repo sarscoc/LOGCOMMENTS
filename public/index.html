@@ -115,6 +115,14 @@
   </dialog>
   <script>
     (() => {
+      const params = new URLSearchParams(location.search);
+      const ownerKey = params.get("owner");
+      if (ownerKey) {
+        localStorage.setItem("trpgMarkerSiteOwnerKey", ownerKey);
+        params.delete("owner");
+        const query = params.toString();
+        history.replaceState(null, "", `${location.pathname}${query ? `?${query}` : ""}${location.hash}`);
+      }
       const limitMessage = "アクティブにできるチャットルームは1部屋までです。";
       const ownedRoomIds = () => {
         const ids = [];
