@@ -81,7 +81,7 @@ export async function onRequest(context) {
 
       if (Number(owned?.count || 0) >= 1) {
         return json({
-          error: "クラウドに作成できる部屋は1人1部屋までです。最終更新から7日で自動削除されます。必要なら先にログを保存してから削除してください。"
+          error: "アクティブにできるチャットルームは1部屋までです。"
         }, 403);
       }
     }
