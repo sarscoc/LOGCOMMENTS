@@ -113,6 +113,60 @@
       <button type="submit" class="primary">保存</button>
     </form>
   </dialog>
+  <script>
+    (() => {
+      const limitMessage = "アクティブにできるチャットルームは1部屋までです。";
+      const ownedRoomIds = () => {
+        const ids = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key?.startsWith("admin:")) ids.push(key.slice(6));
+        }
+        return ids;
+      };
+      const hasActiveOwnedRoom = async () => {
+        if (localStorage.getItem("trpgMarkerSiteOwnerKey")) return false;
+        const ids = ownedRoomIds();
+        if (!ids.length) return false;
+        const results = await Promise.all(ids.map(async id => {
+          try {
+            const response = await fetch(`/api/rooms/${encodeURIComponent(id)}?summary=1`, { cache: "no-store" });
+            return response.ok;
+          } catch {
+            return false;
+          }
+        }));
+        return results.some(Boolean);
+      };
+      const rejectOrHandle = async file => {
+        if (await hasActiveOwnedRoom()) {
+          document.getElementById("homeStatus").textContent = limitMessage;
+          const input = document.getElementById("fileInput");
+          if (input) input.value = "";
+          return;
+        }
+        if (file && typeof window.handleFile === "function") window.handleFile(file);
+      };
+      document.addEventListener("change", event => {
+        if (event.target?.id !== "fileInput") return;
+        const ids = ownedRoomIds();
+        if (!ids.length || localStorage.getItem("trpgMarkerSiteOwnerKey")) return;
+        const file = event.target.files?.[0];
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        rejectOrHandle(file);
+      }, true);
+      document.addEventListener("drop", event => {
+        if (!event.target?.closest?.("#dropzone")) return;
+        const ids = ownedRoomIds();
+        if (!ids.length || localStorage.getItem("trpgMarkerSiteOwnerKey")) return;
+        const file = event.dataTransfer?.files?.[0];
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        rejectOrHandle(file);
+      }, true);
+    })();
+  </script>
   <script src="app.js"></script>
 </body>
 </html>
