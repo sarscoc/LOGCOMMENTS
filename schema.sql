@@ -4,7 +4,8 @@ CREATE TABLE IF NOT EXISTS rooms (
   log_json TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   admin_token TEXT NOT NULL,
-  owner_id TEXT NOT NULL DEFAULT ''
+  owner_id TEXT NOT NULL DEFAULT '',
+  annotation_version INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_rooms_owner ON rooms(owner_id);
 
