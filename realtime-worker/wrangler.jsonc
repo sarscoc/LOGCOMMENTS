@@ -3,6 +3,12 @@
   "name": "trpg-log-marker-realtime",
   "main": "src/index.js",
   "compatibility_date": "2026-08-21",
+  "vars": {
+    "CLEANUP_URL": "https://logcomments.pages.dev/api/maintenance/cleanup"
+  },
+  "triggers": {
+    "crons": ["17 * * * *"]
+  },
   "durable_objects": {
     "bindings": [
       {
