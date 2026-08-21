@@ -55,18 +55,12 @@ export async function onRequest(context) {
   const roomId = roomIdFromPath(pathname);
   if (roomId) {
     const room = await env.DB.prepare(
-      "SELECT created_at FROM rooms WHERE id=?"
+      "SELECT created_at <= datetime('now','-7 days') AS expired FROM rooms WHERE id=?"
     ).bind(roomId).first();
-
-    if (room?.created_at) {
-      const expired = await env.DB.prepare(
-        "SELECT 1 AS expired FROM rooms WHERE id=? AND created_at <= datetime('now','-7 days')"
-      ).bind(roomId).first();
-      if (expired) {
-        return json({
-          error: "この部屋は作成から7日が経過したため削除されました。保存済みのZIPがある場合はオフライン版として開けます。"
-        }, 410);
-      }
+    if (Number(room?.expired || 0) === 1) {
+      return json({
+        error: "この部屋は作成から7日が経過したため削除されました。保存済みのZIPがある場合はオフライン版として開けます。"
+      }, 410);
     }
   }
 
