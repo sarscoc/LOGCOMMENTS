@@ -38,6 +38,13 @@ const ensureRoomLifecycleColumns = async db => {
       created_at
     )
     WHERE last_activity_at='' OR last_activity_at IS NULL`).run();
+
+  // The main room-creation handler still contains an older owner-count safety check.
+  // Expired rooms must not be counted there while they wait for the hourly cleanup.
+  await db.prepare(`UPDATE rooms
+    SET owner_id=''
+    WHERE owner_id<>''
+      AND COALESCE(NULLIF(last_activity_at,''),created_at) <= datetime('now','-7 days')`).run();
 };
 
 const roomIdFromPath = pathname => {
